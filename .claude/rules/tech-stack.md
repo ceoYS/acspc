@@ -8,8 +8,8 @@ AI (Claude Code, Codex CLI) 가 코드 생성·수정·의존성 추가 시 이 
 
 구체 버전 숫자는 **Step 4 repo 초기화 시점** 에 `create-next-app`,
 `create-expo-app` 등이 설치하는 실제 버전으로 최종 확정한다.
-§1 에 기록된 숫자는 작성 시점 (2026-04) 기준 최신 안정 메이저 **추정**
-이며, Step 4 완료 후 실제 값으로 덮어쓴다.
+§1 에 기록된 숫자는 Step 4 (2026-04-22) 실제 설치 버전. 이후 의존성
+업데이트 시 이 파일도 함께 갱신.
 
 재검토 주기: 6개월. Claude Code 또는 사용자가 "tech-stack 재검토" 로
 발동. 메이저 업그레이드는 Gate 1 통과 필수.
@@ -22,7 +22,7 @@ AI (Claude Code, Codex CLI) 가 코드 생성·수정·의존성 추가 시 이 
 ## 1. 확정 스택
 
 ### 1.1 모노레포
-- **Turborepo** + **pnpm workspace**
+- **Turborepo 2.9.6** + **pnpm workspace**
 - 구조:
 ````
   acspc/
@@ -43,14 +43,15 @@ AI (Claude Code, Codex CLI) 가 코드 생성·수정·의존성 추가 시 이 
 - **pnpm** 10
 
 ### 1.3 웹 프론트
-- **Next.js** 최신 메이저 (현재 15 추정), App Router
-- **React** Next 와 호환되는 최신 (현재 19 추정)
-- **Tailwind CSS** 최신 메이저
+- **Next.js 15.5.15**, App Router
+- **React 19.1.0**
+- **Tailwind CSS 4.x**
 - **TanStack Query** v5 이상
 
 ### 1.4 모바일
-- **Expo** 최신 안정 SDK (managed workflow)
-- **expo-router**
+- **Expo SDK 54 (54.0.33)**, managed workflow
+- **expo-router 6.0.23**
+- **React Native 0.81.5**
 - **expo-camera** (연속 촬영)
 - **expo-media-library** (갤러리 앨범 저장)
 - **expo-file-system**
