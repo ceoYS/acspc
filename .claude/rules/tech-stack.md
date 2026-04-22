@@ -39,8 +39,8 @@ AI (Claude Code, Codex CLI) 가 코드 생성·수정·의존성 추가 시 이 
 
 ### 1.2 언어 · 런타임
 - **TypeScript** (strict mode, noUncheckedIndexedAccess)
-- **Node.js** 최신 Active LTS (현재 22 LTS 추정, ≥ 22)
-- **pnpm** 최신 메이저 (현재 10 추정)
+- **Node.js** 22 LTS (Active LTS)
+- **pnpm** 10
 
 ### 1.3 웹 프론트
 - **Next.js** 최신 메이저 (현재 15 추정), App Router
