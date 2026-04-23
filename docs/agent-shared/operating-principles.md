@@ -54,7 +54,29 @@ Evaluator 는 Generator 가 낸 결과를 검토할 뿐 직접 테스트 실행
 표준 분야 목록: 제품 판단 / 프롬프트 설계 / 문서 구조 / 코드 로직 /
 코드 보안 / 테스트 커버리지 / 성능 / UX.
 
-### 3.3 Evaluator 출력 경계
+### 3.3 Evaluator 발동 조건
+
+다음 중 하나 이상 해당 시 Evaluator 필수:
+- Generator 프롬프트에 install / build / network / deps 명령 포함
+- 외부 의존성 추가 (npm / Expo SDK / fonts / Supabase client 등)
+- 복수 파일 동시 생성 또는 설정 파일 (tsconfig, package.json, metro, tailwind.config) 수정
+- 외부 API 경로 사용 시 실제 API 존재 여부 검증 필요 (예: zod v4 `.uuid()` 경로)
+- 파일/설정 상속 (tsconfig extends, package.json devDeps 상속)
+- 수치 검증 조건 (파일 수, 라인 수, 커밋 수) 사전 명기
+- 이전 세션 이슈 패턴과 유사
+
+Evaluator 면제 (사용자 명시 승인 시):
+- docs-only 단일 파일 추가/편집
+- 기존 파일 20줄 이하 수정
+- backlog / handoff 기록
+
+Evaluator 결과 심각도:
+- 🔴 Critical (실행 시 100% 실패) - 수정 후 재투입 필수
+- 🟠 High (부분 실패 / 롤백 가능성) - 수정 권장
+- 🟡 Medium (Gate 누락 / 혼란 요인) - 검토
+- 🟢 Low (스타일) - 선택
+
+### 3.4 Evaluator 출력 경계
 
 - 허용: 문제 위치 지적, 방향 제시, 3~4개 선택지 나열, 5줄 이하 예시 스니펫
 - 금지: 완성된 교체본 작성, 5줄 초과 코드, 파일 섹션 전체 재작성, 다수
@@ -62,7 +84,7 @@ Evaluator 는 Generator 가 낸 결과를 검토할 뿐 직접 테스트 실행
 
 "어디가 문제 + 어떤 방향" 까지. "완성된 교체본" 은 Generator 영역.
 
-### 3.4 배분과 교차 검증 (기본값)
+### 3.5 배분과 교차 검증 (기본값)
 
 - Claude Code 가 Generator 로 쓴 코드 → Codex CLI 가 Evaluator (기본)
 - Codex CLI 가 Generator 로 쓴 코드 → Claude Code 가 Evaluator (기본)
@@ -73,13 +95,13 @@ Evaluator 는 Generator 가 낸 결과를 검토할 뿐 직접 테스트 실행
 
 단순 변경은 같은 AI 가 Generator + Evaluator 겸할 수 있음.
 
-### 3.5 역할 전환 신호
+### 3.6 역할 전환 신호
 
 - "Planner 로" → 계획만.
 - "Generator 로" → 실제 구현.
 - "Evaluator 로 {분야}" → 해당 분야만 검토.
 
-### 3.6 역할 조합 허용 규칙
+### 3.7 역할 조합 허용 규칙
 
 기본값: 한 응답 = 한 역할.
 예외: 사용자가 명시 요청 시 조합 허용 ("계획하고 바로 구현까지", "다 해줘").
