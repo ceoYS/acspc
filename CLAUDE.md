@@ -18,6 +18,16 @@
 
 짜잘한 오류 수정 / 타입 에러 / 린트는 Codex CLI 로 라우팅.
 
+## bash_tool 환경 전제
+
+매 bash 명령 앞에 preamble 필수:
+
+```
+export NODE_EXTRA_CA_CERTS="$HOME/.certs/corp-ca.pem" && export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH" &&
+```
+
+preamble 없으면 Node 20 적용 + corp CA 미로드. 세션 첫 명령에서 `pwd`, `git remote -v`, `node --version`, `ls ~/.certs/corp-ca.pem`, `git log --oneline -1` 로 환경 검증. 불일치 시 Planner 복귀.
+
 ## Claude Code 고유 사용법
 
 ### Artifact 정책
