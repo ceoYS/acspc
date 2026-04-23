@@ -65,10 +65,29 @@ Evaluator 는 Generator 가 낸 결과를 검토할 뿐 직접 테스트 실행
 - 수치 검증 조건 (파일 수, 라인 수, 커밋 수) 사전 명기
 - 이전 세션 이슈 패턴과 유사
 
-Evaluator 면제 (사용자 명시 승인 시):
+Evaluator 면제 (사용자 명시 승인 + Planner 근거 제시 시):
 - docs-only 단일 파일 추가/편집
 - 기존 파일 20줄 이하 수정
 - backlog / handoff 기록
+
+면제 근거 제시 의무:
+- Planner 가 면제를 요청할 때 "왜 이 변경이 발동 조건 및 점검 체크리스트 밖의 blind spot 을 유발하지 않는지" 구체적 근거 제시
+- blind spot 예시 (D-4c 교훈): tsc 통과 ≠ bundler 성공, registry 의존 명령의 corp 망 retry 루프, bash 체인 exit 전파
+- 사용자가 근거 불충분하다고 판단하면 면제 거부 후 Evaluator 필수 적용
+
+점검 체크리스트 (Evaluator 가 Generator 산출물 검토 시 점검):
+- 명령어 shell 구문 오류 (heredoc/quote/escape)
+- 검증 수치 재계산 (파일 수, commit count, staged count)
+- 이전 이슈 재발 리스크 (known-issues / handoff §6 참조)
+- 범위 제한 vs 실제 수정 파일 정합
+- Gate 2 trigger 조건 명확성
+- 금지사항 누락
+- 롤백 경로 유무
+- 외부 라이브러리 API 실체 검증 (존재 ≠ 내용)
+- 설정 파일 extends 대상 내용 확인
+- 번들러 실동작 검증 — tsc --noEmit 통과 ≠ 번들러 성공. packages/* 를 apps/* 에서 소비할 때 실제 번들링 (next build / expo export) 1회 필수
+- registry 접근 명령 금지 — pnpm list/why/outdated 등 corp 망 registry 타는 명령은 retry 루프 유발. 검증은 lockfile grep / readlink / 로컬 파일시스템 조회로
+- bash 체인 exit 전파 방어 — 검증용 조회 명령이 실패해도 후속 스텝 실행되도록 `|| true` 또는 `;` 로 분리. `ls` 등 exit ≠ 0 전파가 Claude Code meta-loop 유발 가능
 
 Evaluator 결과 심각도:
 - 🔴 Critical (실행 시 100% 실패) - 수정 후 재투입 필수
