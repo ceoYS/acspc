@@ -21,4 +21,24 @@ describe("ProjectSchema", () => {
     };
     expect(ProjectSchema.safeParse(invalid).success).toBe(false);
   });
+
+  it("invalid: rejects name that is a single space", () => {
+    const invalid = {
+      id: "00000000-0000-4000-8000-000000000000",
+      user_id: "00000000-0000-4000-8000-000000000001",
+      name: " ",
+      created_at: "2026-04-24T00:00:00.000Z",
+    };
+    expect(ProjectSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("invalid: rejects name that is mixed whitespace (tab/newline/space)", () => {
+    const invalid = {
+      id: "00000000-0000-4000-8000-000000000000",
+      user_id: "00000000-0000-4000-8000-000000000001",
+      name: "\t\n ",
+      created_at: "2026-04-24T00:00:00.000Z",
+    };
+    expect(ProjectSchema.safeParse(invalid).success).toBe(false);
+  });
 });
