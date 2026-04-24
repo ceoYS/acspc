@@ -88,6 +88,12 @@ Evaluator 면제 (사용자 명시 승인 + Planner 근거 제시 시):
 - 번들러 실동작 검증 — tsc --noEmit 통과 ≠ 번들러 성공. packages/* 를 apps/* 에서 소비할 때 실제 번들링 (next build / expo export) 1회 필수
 - registry 접근 명령 금지 — pnpm list/why/outdated 등 corp 망 registry 타는 명령은 retry 루프 유발. 검증은 lockfile grep / readlink / 로컬 파일시스템 조회로
 - bash 체인 exit 전파 방어 — 검증용 조회 명령이 실패해도 후속 스텝 실행되도록 `|| true` 또는 `;` 로 분리. `ls` 등 exit ≠ 0 전파가 Claude Code meta-loop 유발 가능
+- 장시간 실행 명령 완료 판정 — 자체 판단 금지, 명시 성공 문자열 grep 결과로만 기계화
+- 성공/실패 판정 문자열 enumeration 의무 — Step 정의 시 통과·실패 grep 패턴 각 1개 이상 명시
+- 파일 대상 작업 선행 확증 — `git ls-files` + `git check-ignore -v` 로 tracked/untracked/ignored 3상태 확인
+- STOP 조건 scope 구분 — "이번 Chunk 산출물" vs "누적 상태" 혼동 금지
+- 복수 Chunk 연속 발행 금지 — 단일 응답 당 Claude Code 프롬프트 1개, 각 Chunk 선행 조건 명시
+- vitest 통과 판정 패턴 — `Tests N passed (N)` 요약 라인만 신뢰, 개별 테스트명 grep false positive 경계
 
 Evaluator 결과 심각도:
 - 🔴 Critical (실행 시 100% 실패) - 수정 후 재투입 필수
