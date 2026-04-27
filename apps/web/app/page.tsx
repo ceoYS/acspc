@@ -16,9 +16,9 @@ export default function Home() {
             Primary
           </h2>
           <div className="flex gap-3">
-            <button className="min-h-14 rounded-xl bg-slate-900 px-6 text-slate-50">
+            <div className="min-h-14 rounded-xl bg-slate-900 px-6 py-4 text-slate-50">
               Primary Button
-            </button>
+            </div>
             <div className="min-h-14 rounded-xl bg-slate-900 px-6 py-4 text-slate-50">
               bg-slate-900 / text-slate-50
             </div>
