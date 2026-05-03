@@ -65,6 +65,7 @@ iOS 는 중첩 앨범 미지원. V1 은 평면 앨범 1단계만 사용.
 
 ### 1.5 백엔드 / 데이터
 - **Supabase** (Postgres 최신 안정, Auth, Storage, RLS, Edge Functions)
+- **`@supabase/supabase-js` 2.105.1** (클라이언트, packages/api 래퍼 경유)
 - **zod** v4 이상 (스키마 검증, packages/domain 중심)
 - Auth: 매직링크 이메일 (V1 기본)
 
