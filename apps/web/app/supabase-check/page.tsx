@@ -1,7 +1,9 @@
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
+
+export const dynamic = "force-dynamic";
 
 export default async function SupabaseCheckPage() {
-  const { data, error } = await supabase.auth.getSession();
+  const { data, error } = await getSupabase().auth.getSession();
 
   return (
     <main style={{ padding: 24, fontFamily: "monospace" }}>
