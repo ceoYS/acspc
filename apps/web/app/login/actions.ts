@@ -46,3 +46,24 @@ export async function signOut() {
   revalidatePath('/login', 'layout')
   redirect('/login')
 }
+
+export async function createProject(formData: FormData) {
+  const name = formData.get('name')
+  if (typeof name !== 'string' || !name.trim()) {
+    redirect('/login?error=' + encodeURIComponent('Project name required'))
+  }
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+  if (userError || !user) {
+    redirect('/login?error=' + encodeURIComponent('Not authenticated'))
+  }
+  const { error } = await supabase.from('projects').insert({ name: name.trim(), user_id: user.id })
+  if (error) {
+    redirect('/login?error=' + encodeURIComponent(error.message))
+  }
+  revalidatePath('/login', 'layout')
+  redirect('/login')
+}

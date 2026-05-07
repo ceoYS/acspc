@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { signUp, signIn, signOut } from './actions'
+import { signUp, signIn, signOut, createProject } from './actions'
 
 export default async function LoginPage({
   searchParams,
@@ -11,6 +11,10 @@ export default async function LoginPage({
   const {
     data: { user },
   } = await supabase.auth.getUser()
+  const { data: projects } = await supabase
+    .from('projects')
+    .select('id, name, created_at')
+    .order('created_at', { ascending: false })
 
   return (
     <main className="mx-auto max-w-md space-y-4 p-6">
@@ -23,7 +27,7 @@ export default async function LoginPage({
       )}
 
       {user ? (
-        <section className="space-y-3">
+        <section className="space-y-4">
           <p>Logged in as {user.email}</p>
           <form action={signOut}>
             <button
@@ -33,6 +37,34 @@ export default async function LoginPage({
               Sign out
             </button>
           </form>
+
+          <hr className="border-slate-300" />
+
+          <form action={createProject} className="space-y-3">
+            <input
+              type="text"
+              name="name"
+              aria-label="Project name"
+              placeholder="Project name"
+              className="w-full rounded border border-slate-300 px-3 py-2"
+            />
+            <button
+              type="submit"
+              className="rounded bg-slate-900 px-4 py-2 text-slate-50"
+            >
+              Create project
+            </button>
+          </form>
+
+          {projects && projects.length > 0 ? (
+            <ul className="space-y-1">
+              {projects.map((p) => (
+                <li key={p.id}>{p.name}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>No projects yet</p>
+          )}
         </section>
       ) : (
         <>
