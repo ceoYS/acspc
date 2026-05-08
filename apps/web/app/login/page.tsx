@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { signUp, signIn, signOut, createProject } from './actions'
+import PhotoUploadForm from './PhotoUploadForm'
 
 export default async function LoginPage({
   searchParams,
@@ -59,12 +60,18 @@ export default async function LoginPage({
           {projects && projects.length > 0 ? (
             <ul className="space-y-1">
               {projects.map((p) => (
-                <li key={p.id}>{p.name}</li>
+                <li key={p.id}>
+                  <span className="font-mono text-xs text-slate-500">{p.id}</span> {p.name}
+                </li>
               ))}
             </ul>
           ) : (
             <p>No projects yet</p>
           )}
+
+          <hr className="border-slate-300" />
+
+          <PhotoUploadForm />
         </section>
       ) : (
         <>
