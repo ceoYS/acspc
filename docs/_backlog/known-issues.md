@@ -417,3 +417,373 @@ D-4n Chunk 4-revised 부터 모든 회복 chunk = 사전 시뮬레이션 통과 
 ### 관련 commit
 
 D-4n Chunk 4 사고 발생 → Chunk 4-revised 시 사전 시뮬레이션 정착.
+
+## KI-12 (D-4o 신설): Claude.ai 응답 메시지 길이 제한 → 큰 PROMPT 분할 의무
+
+### 증상
+
+Claude.ai (채팅 UI) 에서 큰 PROMPT 응답 작성 시 메시지 길이 한도에 도달 → 응답 본문 단절 또는 일부 내용 미출력. Planner 가 단일 응답에 정찰 + 평가 + 다음 PROMPT 본문을 모두 담으려 할 경우 빈번 발생.
+
+### 원인
+
+Claude.ai 채팅 UI 의 응답 메시지 출력 길이 상한 (UI 차원 제약). PROMPT 본문이 길수록 그 안에 임베딩하는 코드 / SQL / 검증 명령 블록이 누적되어 한도 초과 가능.
+
+### 해결책
+
+큰 PROMPT 는 의미 단위로 분할:
+1. PROMPT 본문 + 검증 명령 블록을 별도 응답으로 분리
+2. 사용자가 PROMPT A 실행 → 결과 회신 → Planner 가 후속 PROMPT B 작성 (이전 응답 종결 후 신규 응답)
+3. 단일 응답에 다중 chunk 의 PROMPT 임베딩 금지
+
+D-4n 진입 메시지 작성 시 이 패턴 명시. D-4o 부터 PROMPT 분할 정합.
+
+### 회피 패턴
+
+Planner 응답 작성 시 길이 자체 모니터링. 한 응답에 PROMPT 본문 1개 + 메타 설명 최소화. 정찰 / 평가 / PROMPT 작성은 분리된 응답.
+
+### 관련 commit
+
+D-4o 시리즈 통합 (handoff §4.1 KI-12 후보 명시).
+
+## KI-13 (D-4o 신설): Claude Code stdout 자동 압축 → expand 후 본문 paste 의무
+
+### 증상
+
+Claude Code 가 bash 명령 실행 후 stdout 출력이 일정 라인 수 초과 시 자동 압축 표기:
+
+```
+... (앞쪽 라인)
++N lines (ctrl+o to expand)
+... (뒤쪽 라인)
+```
+
+압축된 N 라인 본문이 응답 stdout 에 즉시 노출 안 됨. Planner 가 정찰 결과 paste 회신 시 압축된 부분 누락 → 검증 실패 또는 false negative.
+
+### 원인
+
+Claude Code UI 의 stdout 길이 자동 압축 동작. expand 액션 (ctrl+o) 으로 수동 펼치지 않으면 본문 일부 미노출.
+
+### 해결책
+
+정찰 PROMPT 작성 시 다음 명시:
+1. stdout 가 압축 표기로 잘리면 ctrl+o expand 후 본문 전체 paste
+2. 또는 명령 출력을 head/tail/wc 등으로 사전 압축 (압축 발생 자체 회피)
+3. 큰 결과 (정찰 산출 50+ 라인 등) 는 분할 명령 (예: 처음 30라인 + 마지막 30라인)
+
+### 회피 패턴
+
+정찰 stdout 회신 paste 시 expand 확인 의무. 압축 표기가 그대로 paste 되면 Planner 가 expand 재요청.
+
+### 관련 commit
+
+D-4o 시리즈 통합 (handoff §4.1 KI-13 후보, D-4o 신규).
+
+## KI-14 (D-4o 신설): Supabase API URL ≠ Dashboard URL 구분 의무
+
+### 증상
+
+Supabase 의 두 URL 종류:
+- API URL: `https://{ref}.supabase.co` (앱 코드의 createClient 인자)
+- Dashboard URL: `https://supabase.com/dashboard/project/{ref}/...` (관리 UI)
+
+Planner 가 사용자에게 Dashboard 작업 (예: SQL Editor, Auth 정책) 안내 시 두 URL 혼동 위험. 사용자가 API URL 을 브라우저로 직접 열어도 Dashboard 진입 불가.
+
+### 원인
+
+Supabase 의 도메인 구조: API endpoint (`{ref}.supabase.co`) 와 Dashboard (`supabase.com/dashboard`) 가 별개. project ref 는 양쪽에 공통 등장하지만 도메인이 다름.
+
+### 해결책
+
+사용자 안내 시 다음 패턴:
+- API URL 은 코드 / .env / curl 호출 맥락에서만
+- Dashboard 작업 안내 시 정확 URL 명시: `https://supabase.com/dashboard/project/{ref}/{section}` (예: `/auth/providers`, `/sql/new`)
+- 두 URL 혼용 금지
+
+### 회피 패턴
+
+PROMPT 또는 사용자 안내에 URL 적시할 때 용도 (API vs Dashboard) 명시 + 정확 URL.
+
+### 관련 commit
+
+D-4o Chunk 4 (Cloud SQL Editor 적용) 시점 발견 (handoff §4.1 KI-14 후보).
+
+## KI-15 (D-4o 신설): 하루 세션 종료 시 handoff 작성 = 작업 chunk 와 별도 chunk 의무
+
+### 증상
+
+작업 chunk N 의 commit + push 종료 후 Planner 가 "오늘 종결" 인식 → handoff 작성 누락 또는 작업 chunk N 의 응답에 handoff 본문 끼워넣기 시도. 다음 세션 진입 시 컨텍스트 손실 위험.
+
+### 원인
+
+"Chunk 5 push 후 마무리" 표현이 종료 인식으로 이어짐 → 다음 세션 진입자 (자기 자신 또는 사용자) 를 위한 handoff 작성을 별도 작업으로 인식하지 못함.
+
+### 해결책
+
+하루 세션 종료 절차:
+1. 작업 chunk N (코드/문서 commit + push) = 정상 종료
+2. **별도 chunk N+1 = handoff 작성** (handoff-d4X-to-d4Y.md 신설 또는 갱신, commit + push)
+3. 두 chunk 사이 사용자 승인 분리
+
+handoff 본문 = 다음 세션 진입자가 컨텍스트 0 에서 진입 가능한 수준 (환경 검증 / 진입 PROMPT / 핵심 결정 / 잠재 위험 / 진도표).
+
+### 회피 패턴
+
+세션 종료 시 Planner 자체 체크: "handoff 작성 chunk 가 별도 chunk 로 분리되었는가". 작업 chunk 응답에 handoff 본문 임베딩 금지.
+
+### 관련 commit
+
+D-4o Chunk 6 (handoff 작성) 패턴 정합 (handoff §4.1 KI-15 후보).
+
+## KI-16 (D-4o 종결 신설): 새 환경 첫 진입 시 pnpm install 의무 (pre-commit hook 가 docs-only 도 차단)
+
+### 증상
+
+새 환경 (집 PC ↔ 회사 PC) 첫 진입 후 git pull 만 수행하고 docs-only commit 시도 → pre-commit hook (turbo run check-types) 가 node_modules 미설치 / 신규 의존성 미반영 상태에서 실행 불가 → commit 차단.
+
+D-4o Chunk 6 진입 시 회사 PC 측 turbo PATH 미해결 + 의존성 미반영 정합 → STOP 패턴 발생.
+
+### 원인
+
+- pre-commit hook 가 docs-only commit 도 검증 단계 (turbo run check-types) 통과 강제
+- node_modules 미설치 또는 lockfile 변경 미반영 = check-types 실행 자체 불가 또는 type 에러 표면화
+- pnpm `nodeLinker: hoisted` 모드 = root + workspace 양쪽 install 필요 (KI-17 정합)
+
+### 해결책
+
+새 환경 첫 진입 시 표준 절차:
+1. git pull origin main
+2. pnpm install (root)
+3. (선택) pnpm --filter <workspace> install
+4. 이후 commit / push 진입
+
+세션 시작 PROMPT 의 환경 검증 명령에 pnpm install 단계 명시.
+
+### 회피 패턴
+
+handoff §2 환경 가정 + 검증 절에 환경 분기별 (회사 PC / 집 PC) pnpm install 명시. 새 환경 첫 진입 commit 시도 전 의무.
+
+### 관련 commit
+
+D-4o Chunk 6 STOP 패턴 (handoff §4.1 KI-16 후보, D-4o 종결 시 신규).
+
+## KI-17 (D-4p 신설): pnpm nodeLinker: hoisted 모드 검증 패턴 (root + workspace 양쪽)
+
+### 증상
+
+pnpm `nodeLinker: hoisted` 모드에서 의존성 install 후 검증 시:
+- `apps/<workspace>/node_modules/<pkg>` = **비어있음** (또는 디렉토리 자체 부재)
+- root `node_modules/<pkg>` = flat 배치 (실제 install 위치)
+
+검증자가 workspace 측 node_modules 만 확인 → "install 안 됨" 오판 위험. 추정 false negative.
+
+### 원인
+
+pnpm `nodeLinker: hoisted` 모드 = npm 호환 평면 구조. 모든 의존성을 root node_modules 에 flat 배치, workspace 별 node_modules 는 빈 상태 (또는 일부 internal symlink 만).
+
+기본 pnpm 모드 (`nodeLinker: isolated`) 와 다름. KI-03 (root node_modules 검증) 은 hoisted 의 root 측만 명시한 정합.
+
+### 해결책
+
+pnpm 의존성 검증 시:
+1. root `node_modules/<pkg>` 존재 + 버전 확인 (1차)
+2. (참고) `apps/<workspace>/node_modules/<pkg>` 부재 = 정상 (hoisted 정합)
+3. pnpm-lock.yaml 의 importer 측 (`apps/<workspace>` 항목) 의존성 명시 확인 (3차)
+
+세 단계 중 (1) + (3) 통과 시 install 성공 판정.
+
+### 회피 패턴
+
+KI-03 의 hoisted 검증 패턴 + workspace 측 빈 디렉토리 정합 명시. 추측 (apps/<workspace>/node_modules/<pkg> 부재 = install 실패) 금지.
+
+### 관련 commit
+
+D-4p Chunk 2-A (`7dee082`, @supabase/ssr 0.10.2 install) 검증 시 패턴 확립 (handoff §4 D-4p 신규).
+
+## KI-18 (D-4p 신설): 회사 PC WSL bash 환경에서 turbo binary PATH 미해결 (exit=127)
+
+### 증상
+
+회사 PC WSL Ubuntu bash 환경에서 `turbo run check-types` 직접 호출 시:
+
+```
+turbo: command not found
+exit=127
+```
+
+`pnpm install` 정상 + node_modules/.bin/turbo 존재 + package.json scripts 에 정의됨에도 PATH 미해결.
+
+집 PC (sinabro@DESKTOP-CTPJ4S5) 에서는 동일 패턴 정상 동작 (환경 차이).
+
+### 원인
+
+회사 PC WSL bash 의 PATH 구성 차이로 추정 (workspace 의 node_modules/.bin 자동 미포함). 집 PC 와 비교 시 회사 PC 측 PATH 만의 문제.
+
+명시 추정: pnpm 자체는 정상, turbo binary 는 root `node_modules/.bin/turbo` 에 존재 (KI-17 hoisted 정합), 다만 bash PATH 에서 해석 안 됨.
+
+### 해결책
+
+다음 3 패턴 중 하나 사용:
+1. `./node_modules/.bin/turbo run check-types` (root 에서 직접 경로)
+2. `pnpm exec turbo run check-types` (pnpm 의 exec 가 PATH 해석)
+3. `pnpm run check-types` (root package.json scripts 의 turbo 호출 — pnpm 가 PATH 해결)
+
+pre-commit hook 자체는 영향 없음 (hook 내부에서 pnpm 또는 적절 경로로 호출됨).
+
+### 회피 패턴
+
+회사 PC PROMPT 작성 시 turbo 직접 호출 금지. 위 3 패턴 중 root `pnpm run check-types` 권장 (가장 단순 + 양 환경 호환).
+
+### 관련 commit
+
+D-4p Chunk 2-B (`d3824b8`, SSR 클라이언트 분리 + middleware) 진행 중 회사 PC 측 발견 (handoff §4 D-4p 신규).
+
+## KI-19 (D-4q home 신설): Supabase 신규 publishable key 첫 호출 HTTP 401
+
+### 증상
+
+Supabase 의 신규 publishable key (값 prefix `sb_publishable_*`) 를 `.env.local` 에 적용 후 첫 클라이언트 호출 (`/auth/v1/...` 등) 시 HTTP 401 "Invalid API key" 반환. 키 값 자체는 Dashboard 에서 정상 발급됐고 변조 흔적 없음.
+
+D-4q office 에서 첫 시도 시 발생, `.env.local` 갱신 + dev server 재기동 후 200 OK 도달.
+
+### 원인
+
+명시 추정: Supabase 의 신구 key 종류 전환 (legacy anon JWT → 신형 publishable key, prefix `sb_publishable_*`) 시점에 key migration / propagation 지연 또는 key 캐싱 불일치가 첫 호출에서 401 표면화.
+
+D-4q home 시점에는 재현 안 됨 (`.env.local` 가 cloud sync 상태 정합).
+
+### 해결책
+
+다음 순서로 우회:
+1. `apps/web/.env.local` 의 publishable key 값 재확인 (Dashboard → API settings 최신 값 paste)
+2. dev server 재기동 (Next.js env 캐시 갱신)
+3. (1)+(2) 미해결 시 Supabase project 재시작 (Dashboard 의 project pause/resume)
+
+### 회피 패턴
+
+신규 publishable key 도입 chunk 진입 시 첫 호출 401 가능성 사전 인식. 401 표면화 시 즉시 위 3단계 시도 (RLS / GRANT / 코드 의심 전).
+
+### 관련 commit
+
+D-4q office 진행 중 발견 (handoff §1 환경 트러블슈팅 + §4 KI-19 후보 명시). 별도 fix commit 없음 (`.env.local` gitignored 갱신만).
+
+## KI-20 (D-4q home 신설): Supabase Dashboard "Confirm email" 토글 UI 부재 → Management API 우회
+
+### 증상
+
+Supabase Dashboard 의 Authentication → Sign In / Providers → Email provider 영역에서 "Confirm email" 토글이 부재. handoff (D-4p §5.2.1) 결정 (Confirm email OFF, 즉시 RLS 검증 가능) 적용 경로가 UI 에서 노출 안 됨.
+
+D-4q office Cloud Auth 정책 mismatch 발견 시 Dashboard sub-page 재탐색 시도했으나 토글 위치 미확인.
+
+### 원인
+
+명시 추정: Supabase Dashboard UI 변경 — Confirm email 설정이 Email provider 카드 영역에서 다른 sub-page 또는 Management API 전용으로 이전. UI 위치 변동은 handoff §1 명시 추정 사항.
+
+### 해결책
+
+Management API 직접 호출 (D-4q home 적용 정합):
+
+```bash
+export SUPABASE_ACCESS_TOKEN="<temp token>"
+curl -X PATCH "https://api.supabase.com/v1/projects/{ref}/config/auth" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"mailer_autoconfirm": true}'
+```
+
+검증: `/auth/v1/settings` GET 200 + `mailer_autoconfirm:true` 응답.
+
+토큰은 1회용 (사용 후 revoke). 사용자 본인 수동 발급/revoke (보안 격리).
+
+### 회피 패턴
+
+Supabase Auth 정책 변경 시 Dashboard UI 우선 시도, 미발견 시 Management API 즉시 전환. UI 위치 변동 가능성 사전 인지.
+
+### 관련 commit
+
+D-4q home 적용 (handoff §1 Cloud Auth 정책 적용 + §3 KI-20 후보). 코드 commit 없음 (Cloud-side 설정 변경).
+
+## KI-21 (D-4q home 후보 → D-4r home 해결): publishable key 변수명 mismatch (Supabase 신구 key 명명 혼동)
+
+### 증상
+
+`apps/web/.env.local` 의 publishable key (값 prefix `sb_publishable_*` = 신형) 가 변수명 `NEXT_PUBLIC_SUPABASE_ANON_KEY` (구형 anon JWT 명명) 에 담긴 mismatch. 동작 자체는 OK (Supabase SDK 가 값으로만 인증) 이나 변수명/값 형식 불일치는 향후 혼동 위험.
+
+D-4q home 정찰 단계에서 후보로 인식, D-4r home 에서 확정 + 표준화.
+
+### 원인
+
+Supabase 가 legacy anon JWT 에서 신형 publishable key (`sb_publishable_*`) 로 key 종류 전환하면서, .env 변수명 마이그레이션 가이드가 명시 안 됨. 도입 시점에 기존 변수명을 그대로 유지 → 값 형식만 신형으로 갱신.
+
+### 해결책
+
+D-4r home T1 (commit `28de2c3`) 적용:
+- 변수명 일괄 rename: `NEXT_PUBLIC_SUPABASE_ANON_KEY` → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- 5 파일 변경: `apps/web/.env.local` (gitignored, 수동) + 4 코드 파일 (`apps/web/lib/supabase.ts`, `apps/web/lib/supabase/{client,server,middleware}.ts`)
+- 값은 동일 (`sb_publishable_*` 형식) — 변수명만 변경
+
+다른 환경 (회사 PC) 진입 시점에 `.env.local` 수동 rename 의무 (gitignored 라 push 미포함). 누락 시 `next build` env 누락 실패 또는 런타임 401.
+
+### 회피 패턴
+
+Supabase key 도입 시 값 형식 (`sb_publishable_*` vs JWT) 과 변수명 (`PUBLISHABLE_KEY` vs `ANON_KEY`) 정합 사전 확인. 신구 key 명명 혼동 패턴은 KI 로 보존 — 후속 chunk 에서 같은 mismatch 재발 시 즉시 식별.
+
+### 관련 commit
+
+- D-4q home 후보 인식 (handoff §3 KI-21 후보 명시, 정찰 단계 환각 가능성 명시)
+- D-4r home T1 해결: commit `28de2c3` — refactor(web): rename SUPABASE_ANON_KEY → SUPABASE_PUBLISHABLE_KEY (KI-21)
+
+## KI-22 (D-4r home 신설): RLS + policy 만으로는 부족, table-level GRANT 동시 필수
+
+### 증상
+
+Supabase 테이블 생성 시 다음 3 단계만 적용:
+1. `create table public.X (...)`
+2. `alter table public.X enable row level security`
+3. `create policy ... on public.X for all to authenticated using (...) with check (...)`
+
+위 상태에서 authenticated session 의 INSERT/SELECT 시도 → `permission denied for table X` 에러. RLS policy 도달 전 차단.
+
+D-4r home 시나리오 3 (createProject INSERT) 첫 시도 시 발생.
+
+### 원인
+
+Postgres RLS 의 동작 모델: "**이미 GRANT 된 권한 위에서 row 단위 필터**". 즉 GRANT 가 선행 조건, RLS policy 는 그 다음.
+
+`enable row level security` + policy 만 정의하고 `authenticated` role 의 table-level GRANT (SELECT/INSERT/UPDATE/DELETE) 부재 시 → Postgres 가 GRANT 부재로 거부 → RLS 도달 전 `permission denied for table` 차단.
+
+`0001_init.sql` (D-4o Phase 5.2) 가 GRANT 단계 누락. Supabase 기본값이 `authenticated` 에 자동 GRANT 를 주지 않음.
+
+### 해결책
+
+forward-only migration 으로 보충 (D-4r home T1A, commit `c8f2c0e`):
+
+```sql
+-- 0002_grant_projects_authenticated.sql
+grant select, insert, update, delete on table public.projects to authenticated;
+```
+
+검증: `information_schema.role_table_grants` 7 row (REFERENCES, TRIGGER, TRUNCATE 기본 + SELECT/INSERT/UPDATE/DELETE 추가).
+
+기존 `0001_init.sql` 미수정 (forward-only 일관). 후속 테이블 (locations / trades / vendors / photos) 도 동일 GRANT 보충 필요 — 추후 별도 migration 또는 신규 테이블 마이그레이션 작성 시 GRANT 단계 포함.
+
+### 진단 메시지 구분 (handoff §4 교훈)
+
+- `permission denied for table X` = table-level GRANT 부재 (KI-22)
+- `new row violates row-level security policy` = GRANT 는 있으나 RLS 거부 (user_id mismatch 등)
+
+두 메시지 구별 못 하면 RLS policy 만 의심하다 시간 낭비. Phase 5.4 Storage / `storage.objects` 진입 시 동일 패턴 사전 검증.
+
+### 회피 패턴
+
+신규 테이블 migration 작성 시 GRANT 단계 의무 포함:
+1. `create table`
+2. `alter table ... enable row level security`
+3. `create policy ...`
+4. **`grant select, insert, update, delete on table ... to authenticated`** ← KI-22 회피
+
+KI-26 (storage.objects revoke 미발동, 후속 chunk 등재 예정) 의 선행 패턴.
+
+### 관련 commit
+
+- D-4r home T1A: commit `c8f2c0e` — fix(db): grant CRUD on projects to authenticated (Phase 5.2 누락 보충)
+- 신규 migration: `supabase/migrations/0002_grant_projects_authenticated.sql`
