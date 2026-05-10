@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { signUp, signIn, signOut, createProject } from './actions'
-import PhotoUploadForm from './PhotoUploadForm'
+import Link from 'next/link'
 
 export default async function LoginPage({
   searchParams,
@@ -71,7 +71,12 @@ export default async function LoginPage({
 
           <hr className="border-slate-300" />
 
-          <PhotoUploadForm />
+          <Link
+            href="/photos/upload"
+            className="inline-block rounded border border-slate-700 px-4 py-2"
+          >
+            Photo upload
+          </Link>
         </section>
       ) : (
         <>
