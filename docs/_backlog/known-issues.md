@@ -787,3 +787,194 @@ KI-26 (storage.objects revoke 미발동, 후속 chunk 등재 예정) 의 선행 
 
 - D-4r home T1A: commit `c8f2c0e` — fix(db): grant CRUD on projects to authenticated (Phase 5.2 누락 보충)
 - 신규 migration: `supabase/migrations/0002_grant_projects_authenticated.sql`
+
+## KI-23 (D-4s office 신설): 회사 PC ↔ 집 PC Supabase publishable key 형식 불일치 (JWT anon vs sb_publishable_)
+
+### 증상
+
+회사 PC 와 집 PC 의 `apps/web/.env.local` 에 저장된 Supabase publishable key 형식이 다름:
+
+- 회사 PC: `eyJ...` 형식 (JWT 기반 anon key, 구 발급분)
+- 집 PC: `sb_publishable_...` 형식 (Supabase 신규 publishable key, D-4q home 시점 발급)
+
+두 환경 모두 변수명은 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (KI-21 D-4r home 통일 이후) 로 동일.
+
+### 원인
+
+D-4q home 시점 Supabase 가 publishable key 신규 형식 (`sb_publishable_`) 도입. 회사 PC 는 그 이전 (D-4o 이전) 에 발급된 JWT anon key 그대로 사용. 집 PC 는 D-4q home 신설 시점에 신규 형식으로 신규 발급.
+
+`@supabase/supabase-js` 클라이언트가 두 형식 모두 지원 (KI-19 D-4q home 의 첫 호출 401 = unconfirmed user 별건, key 형식 무관).
+
+### 영향
+
+**0**. 두 형식 모두 동등 동작:
+- 회사 PC `eyJ...` → 정상 인증, RLS 통과
+- 집 PC `sb_publishable_...` → 정상 인증, RLS 통과 (D-4s office Phase 5.4.2 사진 업로드 form 검증 완료)
+
+일관성 부재만 잔존. 디버깅 시 환경 차이 변수가 1개 추가되는 비용.
+
+### 회피 패턴
+
+V1 후반 또는 V1 출시 직전에 양 환경 통일. 권장 방향: **신규 형식 (`sb_publishable_`) 으로 일치**.
+
+- 회사 PC `.env.local` 의 PUBLISHABLE_KEY 값을 Supabase Dashboard 에서 발급한 신규 publishable key 로 교체
+- 양 환경 동일 key 사용 시 디버깅 일관성 확보 (key 형식 차이 변수 제거)
+
+V2 multi-developer 진입 시 환경 동기화 정책 (.env.example 갱신, key rotate 가이드) 필수.
+
+### 관련 commit
+
+(없음, 인지 단계)
+
+## KI-24 (D-4s office 신설): .gitignore 의 .bak/.env.local.bak.* 패턴 부재 (보호 미발동, git add . 시 노출 위험)
+
+### 증상
+
+D-4s office 시점 `.env.local.bak.d4s` 백업 파일이 `apps/web/` 디렉터리에 untracked 상태로 잔존. `.gitignore` 가 `.env*` 만 매치하고 `*.bak`, `.env.local.bak.*` 명시 패턴 부재.
+
+`git status` 에서 untracked 표시:
+
+```
+Untracked files:
+  apps/web/.env.local.bak.d4s
+```
+
+`git add .` 또는 `git add apps/web/` 실행 시 .env 백업 파일이 stage 되어 commit 직전까지 노출 위험.
+
+### 원인
+
+D-4o Phase 5.2 repo 초기화 시 `.gitignore` 작성 시 `.env*` 패턴은 포함했으나 `.bak`, `.bak.*`, `.env.*.bak` 등 백업 파일 패턴 누락. Next.js 기본 `.gitignore` template 도 .bak 패턴 미포함.
+
+D-4s office 진입 시 `.env.local` 형식 변경 (KI-21 변수명 통일 후속 정리) 직전 안전망으로 .bak 생성하면서 노출됨.
+
+### 회피 패턴
+
+`.gitignore` 에 백업 패턴 추가:
+
+```
+# Backups (env / config)
+*.bak
+*.bak.*
+.env.*.bak
+.env.local.bak.*
+```
+
+V1 후반 차기 chunk 에서 `.gitignore` 보강 + 기존 .bak 파일 정리 (rm 또는 archive 디렉터리 이동).
+
+### 관련 commit
+
+(없음, 인지 단계)
+
+## KI-25 (D-4s office 신설): domain-model.md 위치 표기 오류 (handoff/메모리 = docs/agent-shared/, 실제 = .claude/rules/)
+
+### 증상
+
+복수 handoff 문서 + 일부 메모리 항목에서 도메인 모델 명세 경로를 `docs/agent-shared/domain-model.md` 로 표기. 실제 파일은 `.claude/rules/domain-model.md` 위치.
+
+`docs/agent-shared/` 디렉터리에는 `operating-principles.md` 만 존재 (역할 분리 / Gate 정의). domain-model 은 AI 기계 친화적 규칙으로 `.claude/rules/` 분류.
+
+### 원인
+
+D-4o 이전 초기 디렉터리 설계 단계에서 `docs/agent-shared/` 통합 안과 `.claude/rules/` 분리 안 사이 결정 변동. 최종은 `.claude/rules/` 로 분리됐으나 일부 handoff/메모리 텍스트에 옛 경로 잔존.
+
+### 영향
+
+- 신규 세션에서 domain-model 참조 시 옛 경로 검색 실패 → 재탐색 비용
+- AI 가 옛 경로로 신규 작업 진행 시도 시 파일 미존재 에러
+
+### 회피 패턴
+
+handoff/메모리 정정 (D-4t 또는 V1 후반 정리 chunk):
+
+- handoff 본문 grep `docs/agent-shared/domain-model` → `.claude/rules/domain-model` 로 일괄 정정
+- 메모리 (`~/.claude/projects/-home-sinabro-work-acspc/memory/`) 동일 정정
+
+`CLAUDE.md` / `AGENTS.md` 본문에는 이미 정확 경로 (`.claude/rules/domain-model.md`) 명시되어 있어 정정 불필요.
+
+### 관련 commit
+
+(없음, 인지 단계)
+
+## KI-26 (D-4s office 신설): Supabase storage.objects REVOKE 미발동 (V4 잔존 7권한, superuser owner 추정)
+
+### 증상
+
+D-4s office Phase 5.4.x storage 보안 강화 작업 중 `storage.objects` 의 anon role 7권한 (SELECT / INSERT / UPDATE / DELETE / REFERENCES / TRIGGER / TRUNCATE) REVOKE 시도. SQL 문법 정상, COMMIT 성공 응답. 그러나 V4 시점 (다음 검증) 에서 7권한 그대로 잔존 — REVOKE 미발동.
+
+```sql
+-- 시도
+revoke select, insert, update, delete, references, trigger, truncate
+  on table storage.objects from anon;
+-- COMMIT 성공
+```
+
+검증 (`information_schema.role_table_grants` query) → anon role 의 7권한 변동 없음.
+
+### 원인 (추정)
+
+`storage.objects` 의 owner 가 `supabase_storage_admin` superuser. Supabase 가 storage 영역을 Postgres role 권한과 별도의 superuser 격리 레이어로 운용. 일반 SQL session 의 REVOKE 가 superuser 소유 테이블에 도달 불가 — 그러나 에러 없이 silent fail (COMMIT 만 성공).
+
+KI-22 (RLS + table-level GRANT) 의 후속 패턴 — storage 영역 RLS+REVOKE 제어가 일반 public 테이블과 동일 모델 아님.
+
+### 영향
+
+V1 검증 시나리오 무영향:
+- TRUNCATE / REFERENCES / TRIGGER → storage REST API 노출 없음 (Postgres 직접 접근 시에만 의미)
+- SELECT / INSERT / UPDATE / DELETE → RLS `to authenticated` policy 가 anon 차단 (KI-27 참조)
+
+V2 다중 bucket 또는 storage 직접 SQL 접근 케이스 진입 시 재평가 필수.
+
+### 회피 패턴
+
+- V1: storage.objects 권한 정리는 RLS policy 의무화로 대체. anon 차단 = `for all to authenticated` policy 명시 (KI-27)
+- V2: storage admin role 위임 또는 Supabase Storage Management API 경유 권한 제어 검토
+
+### 관련 commit
+
+(없음, V1 RLS 우회 패턴으로 대체)
+
+## KI-27 (D-4s office 신설): anon role 도 storage.objects 7권한 직접 grant (V2 다중 bucket 진입 시 RLS 의무 명시 필수)
+
+### 증상
+
+`storage.objects` 의 role grant 상태 확인 시 `anon` 도 7권한 (SELECT / INSERT / UPDATE / DELETE / REFERENCES / TRIGGER / TRUNCATE) 직접 보유:
+
+```
+role  | privilege_type
+------+----------------
+anon  | SELECT
+anon  | INSERT
+anon  | UPDATE
+anon  | DELETE
+anon  | REFERENCES
+anon  | TRIGGER
+anon  | TRUNCATE
+```
+
+KI-26 의 REVOKE 시도가 발동되지 않은 결과로 anon 도 권한 잔존.
+
+### 원인
+
+Supabase storage 기본 grant 가 anon + authenticated 양쪽에 7권한 부여. RLS policy 가 차단을 담당하는 설계 — GRANT 는 광범위, RLS 가 row 단위 필터.
+
+### 영향 (V1 photos bucket 한정)
+
+V1 photos bucket 의 RLS policy 가 `for all to authenticated` 로 anon 차단:
+- anon 의 GRANT 잔존 = Postgres 권한 수준 통과
+- RLS `to authenticated` = anon 차단 (RLS 단계에서 거부)
+
+결과: anon 의 storage.objects 접근 시도 → RLS 거부 (`new row violates row-level security policy` 또는 SELECT 0 rows).
+
+### 회피 패턴 (V2)
+
+V2 다중 bucket 진입 시 RLS policy 작성 의무 명시 필수:
+
+- 각 bucket 별 RLS policy 작성 시 `to authenticated` (또는 더 좁은 role) 명시
+- `to public` / role 명시 누락 시 anon 도 row 통과 가능 → 데이터 유출 위험
+- bucket 신설 migration template 에 RLS policy 단계 포함 (KI-22 회피 패턴의 storage 판)
+
+V1 단일 bucket (photos) 은 현재 RLS 명시되어 있어 안전 (D-4s office Phase 5.4 검증 완료).
+
+### 관련 commit
+
+(없음, V2 회피 패턴 명시 단계)
