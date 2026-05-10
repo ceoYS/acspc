@@ -978,3 +978,50 @@ V1 단일 bucket (photos) 은 현재 RLS 명시되어 있어 안전 (D-4s office
 ### 관련 commit
 
 (없음, V2 회피 패턴 명시 단계)
+
+## KI-28 (D-4t home 후보 → D-4u 등재): 집 PC 환경 분기 (cert / .env.local / username)
+
+관련: KI-10, KI-24.
+
+### 증상
+
+- 집 PC (`sinabro@DESKTOP-CTPJ4S5`) 에서 회사 PC 용 preamble 그대로 사용 시 외부망에서 corp cert 무관 / 인증 실패 가능
+- 집 PC 에 `.env.local` 미존재 (gitignore 정책). 회사 PC 전용
+- username 상이: 집 `sinabro` / 회사 `founder_ys`. 절대 경로 비교 시 false fail
+
+### 원인
+
+- corp root CA = 사내망 전용. 외부망 무관
+- `.env.local` = PC 별 로컬 작성, git 추적 외
+- PROMPT 작성이 회사 PC 1대 가정 → 환경 분기 누락
+
+### 영향
+
+- 환경 검증 PROMPT false fail (D-4u Step 1 / Step 4)
+- Claude Code STOP 오작동 → Planner 재정정 turn
+
+### 회피 패턴
+
+1. **bash preamble 분기**
+   - 회사 PC: `export NODE_EXTRA_CA_CERTS="$HOME/.certs/corp-root.pem" && export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"`
+   - 집 PC: `export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"` (cert 제거)
+2. **PROMPT 작성 규약**
+   - username 하드코딩 금지. `~/work/acspc` / `$HOME` 사용
+   - 절대 경로 비교 시 `/home/*/work/acspc` 또는 `realpath ~/work/acspc` 동적 비교
+3. **`.env.local` 의존 검증**
+   - PC 분기 명시: 회사 PC 필수 / 집 PC 선택
+   - 부재는 ⚠️ N/A, ❌ 아님
+4. **향후 Supabase 런타임 in 집 PC**
+   - 별도 `.env.local` 수동 작성 또는 회사 PC 전용 작업. 시점 결정
+
+### 검증
+
+D-4u 환경 검증 turn 에서 본 KI 적용 후 Step1~3 ✅, Step4 ⚠️ N/A. 후속 PROMPT 는 규약 적용.
+
+### 후속
+
+Evaluator 체크리스트에 "환경 분기 누락 (PC 별 username/cert/env)" 항목 추가 후보.
+
+### 관련 commit
+
+(없음, 인지 + 회피 규약 단계)
