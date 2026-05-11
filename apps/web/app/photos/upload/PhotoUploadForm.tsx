@@ -1,10 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import type { UploadPhotoResult } from './_actions/uploadPhoto'
 
-export default function PhotoUploadForm() {
+type Props = {
+  uploadPhotoAction: (formData: FormData) => Promise<UploadPhotoResult>
+}
+
+export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
   const [projectId, setProjectId] = useState('')
+  const [contentText, setContentText] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -16,48 +21,34 @@ export default function PhotoUploadForm() {
     setStoragePath(null)
     setSignedUrl(null)
 
-    if (!projectId || !file) {
-      setError('project_id 와 파일을 입력하세요.')
+    if (!projectId || !contentText || !file) {
+      setError('project_id, content_text, 파일을 모두 입력하세요.')
       return
     }
 
     setUploading(true)
 
-    const supabase = createClient()
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData?.user) {
-      setError('로그인 필요.')
+    const formData = new FormData()
+    formData.append('project_id', projectId)
+    formData.append('content_text', contentText)
+    formData.append('file', file)
+
+    const result = await uploadPhotoAction(formData)
+
+    if (!result.ok) {
+      const messages: Record<typeof result.error, string> = {
+        validation: '입력값 검증 실패 (project_id UUID / content_text / 파일 확인).',
+        unauthorized: '로그인 필요.',
+        storage: 'storage upload 실패.',
+        db: 'DB insert 실패 (storage rollback 수행).',
+      }
+      setError(messages[result.error])
       setUploading(false)
       return
     }
 
-    const userId = userData.user.id
-    const photoUuid = crypto.randomUUID()
-    const path = `${userId}/${projectId}/${photoUuid}.jpg`
-
-    const { error: uploadError } = await supabase.storage
-      .from('photos')
-      .upload(path, file, { upsert: false })
-
-    if (uploadError) {
-      setError(`upload 실패: ${uploadError.message}`)
-      setUploading(false)
-      return
-    }
-
-    setStoragePath(path)
-
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from('photos')
-      .createSignedUrl(path, 60)
-
-    if (signedError) {
-      setError(`signed URL 생성 실패: ${signedError.message}`)
-      setUploading(false)
-      return
-    }
-
-    setSignedUrl(signedData.signedUrl)
+    setStoragePath(result.storagePath)
+    setSignedUrl(result.signedUrl)
     setUploading(false)
   }
 
@@ -70,6 +61,14 @@ export default function PhotoUploadForm() {
         placeholder="project_id (UUID)"
         value={projectId}
         onChange={(e) => setProjectId(e.target.value)}
+        className="w-full rounded border border-slate-300 px-3 py-2"
+      />
+      <input
+        type="text"
+        aria-label="content_text"
+        placeholder="content_text (사진 설명, 1~200자)"
+        value={contentText}
+        onChange={(e) => setContentText(e.target.value)}
         className="w-full rounded border border-slate-300 px-3 py-2"
       />
       <input
