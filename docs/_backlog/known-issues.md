@@ -1061,3 +1061,41 @@ D-4v 5.5.3 commit + push 재시도 통과 ✅ (Step 2' 수정안, add 대상 uns
 ### 관련 commit
 - 사고 발생 + 회피: 3873e5d
 - KI-29 등재: (본 commit)
+
+## KI-31 (D-5b): openpyxl AnchorMarker col 해석 오류 (정찰 1A 사후 발견)
+
+### 증상
+D-5b E3 정찰 1A 에서 240223_사진대지.xlsx 의 이미지 anchor 를 openpyxl 로 읽어 `from(col=1,row=4) to(col=9,row=5)` 로 추출 후 "to col=9 = J 컬럼 포함" 으로 해석. 이를 ExcelJS string range `'B5:J6'` 로 변환 (변경 4 후보) → 240223 원본 대비 우측 1 컬럼 + 하단 1 행 초과.
+
+### 원인
+openpyxl `AnchorMarker.col` 은 **0-based column index** (좌측 경계). 즉:
+- `from(col=1,row=4)` = ExcelJS `B5` 좌상단 (B 컬럼 = index 1)
+- `to(col=9,row=5)` = ExcelJS `I5` 의 우하단 (I 컬럼 = index 8 의 우측 경계 = col 9 의 좌측 경계)
+
+정찰 1A 는 "to col=9 = 9 번째 column (J)" 으로 1-based 해석 오류.
+
+### 매핑 정합 표
+
+| openpyxl AnchorMarker | ExcelJS string range |
+|---|---|
+| from(col=1,row=4) to(col=9,row=5) | `'B5:I5'` (single row B~I) |
+| from(col=1,row=4) to(col=10,row=6) | `'B5:J6'` (two row B~J) |
+
+### 영향
+- V1: 240223 양식 재현 정확도. 변경 4 적용 시 우측 J 컬럼까지 침범 + 메타 박스 (row 7~8) 와 이미지 영역 (row 5~6) 사이 row 6 침범.
+- V1.5+: 차후 openpyxl 기반 다른 양식 정찰 시 동일 패턴 반복 위험.
+
+### 회피 패턴
+1. openpyxl `AnchorMarker.col=N` → ExcelJS string range 우하단 = `colLetter(N-1)` + same row.
+2. 변환 시 row 도 동일 처리: `AnchorMarker.row=R` → ExcelJS row = `R+1` 좌상단 / row = `R` 우하단.
+3. 차후 양식 정찰 PROMPT 작성 시 "AnchorMarker = 좌측 경계 기준 0-based" 명시.
+
+### 검증
+D-5b 정찰 1A 사후 발견 → E3 변경 4 (`B5:J6` / `B11:J12`) revert. 240223 원본 = `B5:I5` / `B11:I11` 와 정확히 일치 확인.
+
+### 후속
+- Evaluator 체크리스트 §n (openpyxl 기반 양식 정찰 결과 ExcelJS 변환 시 col index 1-off 점검) 신설 후보.
+
+### 관련 commit
+- 변경 4 revert: 553d0db
+- KI-31 등재: (본 commit)
