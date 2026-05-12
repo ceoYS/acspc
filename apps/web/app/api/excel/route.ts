@@ -39,6 +39,29 @@ function pickName(rel: PhotoRow['location'] | PhotoRow['trade']): string {
   return rel.name
 }
 
+function applyBoxBorder(
+  sheet: ExcelJS.Worksheet,
+  range: { top: number; bottom: number; left: number; right: number },
+  outer: ExcelJS.BorderStyle,
+  inner: ExcelJS.BorderStyle | null,
+): void {
+  for (let r = range.top; r <= range.bottom; r++) {
+    for (let c = range.left; c <= range.right; c++) {
+      const cell = sheet.getCell(r, c)
+      const border: Partial<ExcelJS.Borders> = {}
+      if (r === range.top) border.top = { style: outer }
+      else if (inner) border.top = { style: inner }
+      if (r === range.bottom) border.bottom = { style: outer }
+      else if (inner) border.bottom = { style: inner }
+      if (c === range.left) border.left = { style: outer }
+      else if (inner) border.left = { style: inner }
+      if (c === range.right) border.right = { style: outer }
+      else if (inner) border.right = { style: inner }
+      cell.border = border
+    }
+  }
+}
+
 export async function POST(req: Request) {
   let body: unknown
   try {
@@ -117,13 +140,13 @@ export async function POST(req: Request) {
     sheet.columns = [
       { width: 1 },
       { width: 9 },
-      { width: 13 },
-      { width: 13 },
-      { width: 13 },
-      { width: 13 },
-      { width: 13 },
-      { width: 13 },
-      { width: 13 },
+      { width: 9 },
+      { width: 9 },
+      { width: 9 },
+      { width: 9 },
+      { width: 9 },
+      { width: 9 },
+      { width: 9 },
       { width: 1 },
     ]
 
@@ -153,13 +176,18 @@ export async function POST(req: Request) {
 
     const title = sheet.getCell('C1')
     title.value = '사   진   대   지'
-    title.font = { bold: true, size: 16 }
+    title.font = { name: '맑은 고딕', bold: true, size: 32 }
     title.alignment = { horizontal: 'center', vertical: 'middle' }
 
     const projectCell = sheet.getCell('A3')
     projectCell.value = project.name
     projectCell.font = { bold: true, size: 12 }
     projectCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+    applyBoxBorder(sheet, { top: 5, bottom: 5, left: 2, right: 10 }, 'thin', null)
+    applyBoxBorder(sheet, { top: 7, bottom: 8, left: 1, right: 10 }, 'thin', 'hair')
+    applyBoxBorder(sheet, { top: 11, bottom: 11, left: 2, right: 10 }, 'thin', null)
+    applyBoxBorder(sheet, { top: 13, bottom: 14, left: 1, right: 10 }, 'thin', 'hair')
 
     const photo1 = rows[2 * i]
     const photo2 = rows[2 * i + 1]
@@ -174,7 +202,7 @@ export async function POST(req: Request) {
       sheet.getCell('F8').value = '일   자'
       const date1 = sheet.getCell('G8')
       date1.value = toExcelSerial(photo1.taken_at)
-      date1.numFmt = 'yyyy-mm-dd'
+      date1.numFmt = 'yyyy/mm/dd(aaa)'
       ;['A7', 'F7', 'A8', 'F8'].forEach((addr) => {
         const c = sheet.getCell(addr)
         c.alignment = { horizontal: 'center', vertical: 'middle' }
@@ -204,7 +232,7 @@ export async function POST(req: Request) {
       sheet.getCell('F14').value = '일   자'
       const date2 = sheet.getCell('G14')
       date2.value = toExcelSerial(photo2.taken_at)
-      date2.numFmt = 'yyyy-mm-dd'
+      date2.numFmt = 'yyyy/mm/dd(aaa)'
       ;['A13', 'F13', 'A14', 'F14'].forEach((addr) => {
         const c = sheet.getCell(addr)
         c.alignment = { horizontal: 'center', vertical: 'middle' }
