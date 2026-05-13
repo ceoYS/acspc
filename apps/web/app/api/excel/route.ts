@@ -73,7 +73,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return new Response('validation failed', { status: 400 })
   }
-  const { project_id, vendor_id } = parsed.data
+  const { project_id, vendor_id, sortKey } = parsed.data
 
   const supabase = await createClient()
   const {
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
     return new Response('unauthorized', { status: 401 })
   }
 
-  const { data: photos, error: photosError } = await supabase
+  let q = supabase
     .from('photos')
     .select(
       'id, created_at, taken_at, content_text, storage_path, location:locations(name), trade:trades(name)',
@@ -91,11 +91,31 @@ export async function POST(req: Request) {
     .eq('user_id', user.id)
     .eq('project_id', project_id)
     .eq('vendor_id', vendor_id)
-    .order('created_at', { ascending: true })
+
+  if (sortKey === 'date') {
+    q = q
+      .order('taken_at', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+  } else {
+    // sortKey === 'location' → fetch 시 created_at asc 만 (client-side sort secondary 보존)
+    // PostgREST 는 nested column 으로 parent 정렬 미지원 (KI-32)
+    q = q.order('created_at', { ascending: true })
+  }
+
+  const { data: fetchedPhotos, error: photosError } = await q
 
   if (photosError) {
     return new Response('photos query failed', { status: 500 })
   }
+
+  const photos =
+    sortKey === 'location' && fetchedPhotos
+      ? [...fetchedPhotos].sort((a, b) => {
+          const aName = pickName(a.location) ?? ''
+          const bName = pickName(b.location) ?? ''
+          return aName.localeCompare(bName, 'ko')
+        })
+      : fetchedPhotos
   const rows = (photos ?? []) as PhotoRow[]
   if (rows.length === 0) {
     return new Response('no photos', { status: 404 })

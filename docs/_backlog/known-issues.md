@@ -1099,3 +1099,51 @@ D-5b 정찰 1A 사후 발견 → E3 변경 4 (`B5:J6` / `B11:J12`) revert. 24022
 ### 관련 commit
 - 변경 4 revert: 553d0db
 - KI-31 등재: (본 commit)
+
+## KI-32 (D-5c): PostgREST 의 nested column 으로 parent 정렬 미지원
+
+### 증상
+chunk A (V1 §5 2차 PASS) 위치 순 다운로드 시 PostgrestFilterBuilder.order 의 column 인자에 `'locations(name)'` 사용 → PostgREST 가 500 에러 반환 ("photos query failed", Gate 2 b-2 발견).
+
+```typescript
+// 거부되는 패턴
+.order('locations(name)', { ascending: true, nullsFirst: false })
+```
+
+### 원인
+PostgREST 의 nested column ordering 규칙:
+- `?order=name.asc` → parent rows 정렬 (parent column 만)
+- `?locations.order=name.asc` → embedded resource 자체 정렬 (parent 순서 영향 X, `referencedTable` 옵션 대응)
+- `?order=locations(name).asc` → **PostgREST 가 거부**
+
+정찰 2B B-2 의 `node_modules/@supabase/postgrest-js/src/PostgrestTransformBuilder.ts` impl L275 example 해석은 embedded resource 정렬 syntax 일 가능성. parent rows 를 nested column 기준 정렬은 PostgREST 가 직접 지원하지 않음.
+
+### 영향
+- V1 §5 위치 순 정렬 = client-side sort 또는 RPC 필요
+- 차후 nested join 으로 parent 정렬 시도 시 동일 패턴 재발 위험
+- 정찰 시 node_modules impl example 만으로 판단 = 위험 (실 query 검증 필수)
+
+### 회피 패턴
+1. **client-side sort** (V1 채택):
+```typescript
+   const sorted = [...rows].sort((a, b) => {
+     const aName = pickName(a.location) ?? ''
+     const bName = pickName(b.location) ?? ''
+     return aName.localeCompare(bName, 'ko')
+   })
+```
+   ES2019+ 안정 정렬 보장 → secondary key (fetch 시 created_at asc) 보존. 한글 시 `'ko'` locale 필수.
+
+2. RPC 함수 정의 (V2 검토): Supabase 측 SQL `ORDER BY locations.name` + INNER JOIN
+
+3. 정찰 시 PostgREST nested column ordering 은 embedded resource limitation 명시 + 실 query 검증 필수
+
+### 검증
+D-5c Gate 2 b-2 발견 → F-1 (client-side sort) 적용. Gate 2 b-2 재검증 PASS 후 KI 확정.
+
+### 후속
+- Evaluator 체크리스트 §o (PostgREST nested column parent 정렬 시도 시 client-side sort 권장) 신설 후보
+- 정찰 시 node_modules impl example 만으로 판단 금지, 실 query smoke test 1회 추가 검토
+
+### 관련 commit
+- 사고 발생 + F-1 fix + KI-32 등재: (본 commit)

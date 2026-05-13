@@ -8,6 +8,7 @@ const inputClass =
 export default function ExcelGenerateForm() {
   const [projectId, setProjectId] = useState('')
   const [vendorId, setVendorId] = useState('')
+  const [sortKey, setSortKey] = useState<'location' | 'date'>('location')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -22,7 +23,11 @@ export default function ExcelGenerateForm() {
       const res = await fetch('/api/excel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, vendor_id: vendorId }),
+        body: JSON.stringify({
+          project_id: projectId,
+          vendor_id: vendorId,
+          sortKey,
+        }),
       })
       if (!res.ok) {
         const text = await res.text()
@@ -73,6 +78,31 @@ export default function ExcelGenerateForm() {
           className={inputClass}
         />
       </label>
+      <fieldset className="flex flex-col gap-1">
+        <legend className="text-sm text-slate-700">정렬 기준</legend>
+        <div className="flex gap-4">
+          <label className="flex items-center gap-2 text-sm text-slate-900">
+            <input
+              type="radio"
+              name="sortKey"
+              value="location"
+              checked={sortKey === 'location'}
+              onChange={() => setSortKey('location')}
+            />
+            위치 순
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-900">
+            <input
+              type="radio"
+              name="sortKey"
+              value="date"
+              checked={sortKey === 'date'}
+              onChange={() => setSortKey('date')}
+            />
+            날짜 순
+          </label>
+        </div>
+      </fieldset>
       <button
         type="button"
         onClick={handleGenerate}
