@@ -23,13 +23,32 @@ function toExcelSerial(iso: string): number {
   return d.getTime() / 86400000 + 25569
 }
 
+const seoulDateFmt = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Seoul',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+function toSeoulDate(iso: string): string {
+  const parts = seoulDateFmt.formatToParts(new Date(iso))
+  const y = parts.find((p) => p.type === 'year')?.value
+  const m = parts.find((p) => p.type === 'month')?.value
+  const d = parts.find((p) => p.type === 'day')?.value
+  if (!y || !m || !d) throw new Error(`toSeoulDate parse fail: ${iso}`)
+  return `${y}-${m}-${d}`
+}
+
 type PhotoRow = {
   id: string
   created_at: string
   taken_at: string
   content_text: string
   storage_path: string
-  location: { name: string } | { name: string }[] | null
+  location:
+    | { id: string; name: string }
+    | { id: string; name: string }[]
+    | null
   trade: { name: string } | { name: string }[] | null
 }
 
@@ -37,6 +56,29 @@ function pickName(rel: PhotoRow['location'] | PhotoRow['trade']): string {
   if (!rel) return ''
   if (Array.isArray(rel)) return rel[0]?.name ?? ''
   return rel.name
+}
+
+function pickLocationId(rel: PhotoRow['location']): string {
+  if (!rel) return ''
+  if (Array.isArray(rel)) return rel[0]?.id ?? ''
+  return rel.id
+}
+
+const SHEET_NAME_MAX = 31
+const SHEET_NAME_SUFFIX_BUFFER = 6 // " (99)" 공간 확보
+
+function sanitizeSheetName(name: string): string {
+  const cleaned = name.replace(/[\\\/\?\*\:\[\]]/g, '_').trim()
+  if (cleaned.length === 0) return 'Sheet'
+  return cleaned.slice(0, SHEET_NAME_MAX - SHEET_NAME_SUFFIX_BUFFER)
+}
+
+function makeUniqueSheetName(base: string, used: Map<string, number>): string {
+  const count = (used.get(base) ?? 0) + 1
+  used.set(base, count)
+  if (count === 1) return base
+  const suffix = ` (${count})`
+  return base.slice(0, SHEET_NAME_MAX - suffix.length) + suffix
 }
 
 function applyBoxBorder(
@@ -83,24 +125,16 @@ export async function POST(req: Request) {
     return new Response('unauthorized', { status: 401 })
   }
 
-  let q = supabase
+  const q = supabase
     .from('photos')
     .select(
-      'id, created_at, taken_at, content_text, storage_path, location:locations(name), trade:trades(name)',
+      'id, created_at, taken_at, content_text, storage_path, location:locations(id, name), trade:trades(name)',
     )
     .eq('user_id', user.id)
     .eq('project_id', project_id)
     .eq('vendor_id', vendor_id)
-
-  if (sortKey === 'date') {
-    q = q
-      .order('taken_at', { ascending: true, nullsFirst: false })
-      .order('created_at', { ascending: true })
-  } else {
-    // sortKey === 'location' → fetch 시 created_at asc 만 (client-side sort secondary 보존)
-    // PostgREST 는 nested column 으로 parent 정렬 미지원 (KI-32)
-    q = q.order('created_at', { ascending: true })
-  }
+    .order('taken_at', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true })
 
   const { data: fetchedPhotos, error: photosError } = await q
 
@@ -110,7 +144,8 @@ export async function POST(req: Request) {
 
   const photos =
     sortKey === 'location' && fetchedPhotos
-      ? [...fetchedPhotos].sort((a, b) => {
+      ? // stable sort (V8 Node ≥12) preserves Postgres order (taken_at asc, created_at asc) as secondary ordering
+        [...fetchedPhotos].sort((a, b) => {
           const aName = pickName(a.location) ?? ''
           const bName = pickName(b.location) ?? ''
           return aName.localeCompare(bName, 'ko')
@@ -141,134 +176,164 @@ export async function POST(req: Request) {
     return new Response('vendor not found', { status: 404 })
   }
 
-  const imageBuffers = await Promise.all(
-    rows.map(async (p) => {
+  const imageBuffers = new Map<string, Buffer>()
+  await Promise.all(
+    rows.map(async (photo) => {
       const { data, error } = await supabase.storage
         .from('photos')
-        .download(p.storage_path)
-      if (error || !data) return null
-      return new Uint8Array(await data.arrayBuffer())
+        .download(photo.storage_path)
+      if (error || !data) return
+      const arr = await data.arrayBuffer()
+      imageBuffers.set(photo.id, Buffer.from(arr))
     }),
   )
 
+  // Map insertion order preserved (ES2015+ spec) → group order = sort order
+  const groups = new Map<string, PhotoRow[]>()
+  for (const photo of rows) {
+    const key =
+      sortKey === 'location'
+        ? pickLocationId(photo.location)
+        : toSeoulDate(photo.taken_at)
+    const arr = groups.get(key) ?? []
+    arr.push(photo)
+    groups.set(key, arr)
+  }
+
   const workbook = new ExcelJS.Workbook()
-  const sheetCount = Math.ceil(rows.length / 2)
+  const usedSheetNames = new Map<string, number>()
 
-  for (let i = 0; i < sheetCount; i++) {
-    const sheet = workbook.addWorksheet(String(i + 1))
+  for (const [groupKey, groupPhotos] of groups) {
+    const pairCount = Math.ceil(groupPhotos.length / 2)
+    const groupFirst = groupPhotos[0]
+    if (!groupFirst) continue
 
-    sheet.columns = [
-      { width: 1 },
-      { width: 9 },
-      { width: 9 },
-      { width: 9 },
-      { width: 9 },
-      { width: 9 },
-      { width: 9 },
-      { width: 9 },
-      { width: 9 },
-      { width: 1 },
-    ]
+    const groupDisplayName = sanitizeSheetName(
+      sortKey === 'location'
+        ? (pickName(groupFirst.location) ?? '(no location)')
+        : groupKey,
+    )
 
-    const rowHeights = [
-      44.25, 6.95, 21, 4.5, 275.1, 4.5, 21, 22.5, 6, 4.5, 275.1, 4.5, 21, 22.5,
-    ]
-    rowHeights.forEach((h, idx) => {
-      sheet.getRow(idx + 1).height = h
-    })
+    for (let pairIdx = 0; pairIdx < pairCount; pairIdx++) {
+      const sheetName = makeUniqueSheetName(groupDisplayName, usedSheetNames)
+      const sheet = workbook.addWorksheet(sheetName)
 
-    sheet.mergeCells('C1:H1')
-    sheet.mergeCells('A3:J3')
-    sheet.mergeCells('B5:I5')
-    sheet.mergeCells('A7:B7')
-    sheet.mergeCells('C7:E7')
-    sheet.mergeCells('G7:J7')
-    sheet.mergeCells('A8:B8')
-    sheet.mergeCells('C8:E8')
-    sheet.mergeCells('G8:J8')
-    sheet.mergeCells('B11:I11')
-    sheet.mergeCells('A13:B13')
-    sheet.mergeCells('C13:E13')
-    sheet.mergeCells('G13:J13')
-    sheet.mergeCells('A14:B14')
-    sheet.mergeCells('C14:E14')
-    sheet.mergeCells('G14:J14')
+      sheet.columns = [
+        { width: 1 },
+        { width: 9 },
+        { width: 9 },
+        { width: 9 },
+        { width: 9 },
+        { width: 9 },
+        { width: 9 },
+        { width: 9 },
+        { width: 9 },
+        { width: 1 },
+      ]
 
-    const title = sheet.getCell('C1')
-    title.value = '사   진   대   지'
-    title.font = { name: '맑은 고딕', bold: true, size: 32 }
-    title.alignment = { horizontal: 'center', vertical: 'middle' }
-
-    const projectCell = sheet.getCell('A3')
-    projectCell.value = project.name
-    projectCell.font = { bold: true, size: 12 }
-    projectCell.alignment = { horizontal: 'center', vertical: 'middle' }
-
-    applyBoxBorder(sheet, { top: 5, bottom: 5, left: 2, right: 10 }, 'thin', null)
-    applyBoxBorder(sheet, { top: 7, bottom: 8, left: 1, right: 10 }, 'thin', 'hair')
-    applyBoxBorder(sheet, { top: 11, bottom: 11, left: 2, right: 10 }, 'thin', null)
-    applyBoxBorder(sheet, { top: 13, bottom: 14, left: 1, right: 10 }, 'thin', 'hair')
-
-    const photo1 = rows[2 * i]
-    const photo2 = rows[2 * i + 1]
-
-    if (photo1) {
-      sheet.getCell('A7').value = '공   종'
-      sheet.getCell('C7').value = pickName(photo1.trade)
-      sheet.getCell('F7').value = '위   치'
-      sheet.getCell('G7').value = pickName(photo1.location)
-      sheet.getCell('A8').value = '내   용'
-      sheet.getCell('C8').value = photo1.content_text
-      sheet.getCell('F8').value = '일   자'
-      const date1 = sheet.getCell('G8')
-      date1.value = toExcelSerial(photo1.taken_at)
-      date1.numFmt = 'yyyy/mm/dd(aaa)'
-      ;['A7', 'F7', 'A8', 'F8'].forEach((addr) => {
-        const c = sheet.getCell(addr)
-        c.alignment = { horizontal: 'center', vertical: 'middle' }
-      })
-      ;['C7', 'G7', 'C8', 'G8'].forEach((addr) => {
-        const c = sheet.getCell(addr)
-        c.alignment = { horizontal: 'center', vertical: 'middle' }
+      const rowHeights = [
+        44.25, 6.95, 21, 4.5, 275.1, 4.5, 21, 22.5, 6, 4.5, 275.1, 4.5, 21, 22.5,
+      ]
+      rowHeights.forEach((h, idx) => {
+        sheet.getRow(idx + 1).height = h
       })
 
-      const buf1 = imageBuffers[2 * i]
-      if (buf1) {
-        const imageId1 = workbook.addImage({
-          buffer: buf1.buffer as ArrayBuffer,
-          extension: 'jpeg',
+      sheet.mergeCells('C1:H1')
+      sheet.mergeCells('A3:J3')
+      sheet.mergeCells('B5:I5')
+      sheet.mergeCells('A7:B7')
+      sheet.mergeCells('C7:E7')
+      sheet.mergeCells('G7:J7')
+      sheet.mergeCells('A8:B8')
+      sheet.mergeCells('C8:E8')
+      sheet.mergeCells('G8:J8')
+      sheet.mergeCells('B11:I11')
+      sheet.mergeCells('A13:B13')
+      sheet.mergeCells('C13:E13')
+      sheet.mergeCells('G13:J13')
+      sheet.mergeCells('A14:B14')
+      sheet.mergeCells('C14:E14')
+      sheet.mergeCells('G14:J14')
+
+      const title = sheet.getCell('C1')
+      title.value = '사   진   대   지'
+      title.font = { name: '맑은 고딕', bold: true, size: 32 }
+      title.alignment = { horizontal: 'center', vertical: 'middle' }
+
+      const projectCell = sheet.getCell('A3')
+      projectCell.value =
+        sortKey === 'location'
+          ? `${project.name} — 위치: ${pickName(groupFirst.location)}`
+          : `${project.name} / ${groupKey}`
+      projectCell.font = { bold: true, size: 12 }
+      projectCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+      applyBoxBorder(sheet, { top: 5, bottom: 5, left: 2, right: 10 }, 'thin', null)
+      applyBoxBorder(sheet, { top: 7, bottom: 8, left: 1, right: 10 }, 'thin', 'hair')
+      applyBoxBorder(sheet, { top: 11, bottom: 11, left: 2, right: 10 }, 'thin', null)
+      applyBoxBorder(sheet, { top: 13, bottom: 14, left: 1, right: 10 }, 'thin', 'hair')
+
+      const photo1 = groupPhotos[2 * pairIdx]
+      const photo2 = groupPhotos[2 * pairIdx + 1]
+
+      if (photo1) {
+        sheet.getCell('A7').value = '공   종'
+        sheet.getCell('C7').value = pickName(photo1.trade)
+        sheet.getCell('F7').value = '위   치'
+        sheet.getCell('G7').value = pickName(photo1.location)
+        sheet.getCell('A8').value = '내   용'
+        sheet.getCell('C8').value = photo1.content_text
+        sheet.getCell('F8').value = '일   자'
+        const date1 = sheet.getCell('G8')
+        date1.value = toExcelSerial(photo1.taken_at)
+        date1.numFmt = 'yyyy/mm/dd(aaa)'
+        ;['A7', 'F7', 'A8', 'F8'].forEach((addr) => {
+          const c = sheet.getCell(addr)
+          c.alignment = { horizontal: 'center', vertical: 'middle' }
         })
-        sheet.addImage(imageId1, 'B5:I5')
+        ;['C7', 'G7', 'C8', 'G8'].forEach((addr) => {
+          const c = sheet.getCell(addr)
+          c.alignment = { horizontal: 'center', vertical: 'middle' }
+        })
+
+        const buf1 = imageBuffers.get(photo1.id)
+        if (buf1) {
+          const imageId1 = workbook.addImage({
+            buffer: buf1.buffer as ArrayBuffer,
+            extension: 'jpeg',
+          })
+          sheet.addImage(imageId1, 'B5:I5')
+        }
       }
-    }
 
-    if (photo2) {
-      sheet.getCell('A13').value = '공   종'
-      sheet.getCell('C13').value = pickName(photo2.trade)
-      sheet.getCell('F13').value = '위   치'
-      sheet.getCell('G13').value = pickName(photo2.location)
-      sheet.getCell('A14').value = '내   용'
-      sheet.getCell('C14').value = photo2.content_text
-      sheet.getCell('F14').value = '일   자'
-      const date2 = sheet.getCell('G14')
-      date2.value = toExcelSerial(photo2.taken_at)
-      date2.numFmt = 'yyyy/mm/dd(aaa)'
-      ;['A13', 'F13', 'A14', 'F14'].forEach((addr) => {
-        const c = sheet.getCell(addr)
-        c.alignment = { horizontal: 'center', vertical: 'middle' }
-      })
-      ;['C13', 'G13', 'C14', 'G14'].forEach((addr) => {
-        const c = sheet.getCell(addr)
-        c.alignment = { horizontal: 'center', vertical: 'middle' }
-      })
-
-      const buf2 = imageBuffers[2 * i + 1]
-      if (buf2) {
-        const imageId2 = workbook.addImage({
-          buffer: buf2.buffer as ArrayBuffer,
-          extension: 'jpeg',
+      if (photo2) {
+        sheet.getCell('A13').value = '공   종'
+        sheet.getCell('C13').value = pickName(photo2.trade)
+        sheet.getCell('F13').value = '위   치'
+        sheet.getCell('G13').value = pickName(photo2.location)
+        sheet.getCell('A14').value = '내   용'
+        sheet.getCell('C14').value = photo2.content_text
+        sheet.getCell('F14').value = '일   자'
+        const date2 = sheet.getCell('G14')
+        date2.value = toExcelSerial(photo2.taken_at)
+        date2.numFmt = 'yyyy/mm/dd(aaa)'
+        ;['A13', 'F13', 'A14', 'F14'].forEach((addr) => {
+          const c = sheet.getCell(addr)
+          c.alignment = { horizontal: 'center', vertical: 'middle' }
         })
-        sheet.addImage(imageId2, 'B11:I11')
+        ;['C13', 'G13', 'C14', 'G14'].forEach((addr) => {
+          const c = sheet.getCell(addr)
+          c.alignment = { horizontal: 'center', vertical: 'middle' }
+        })
+
+        const buf2 = imageBuffers.get(photo2.id)
+        if (buf2) {
+          const imageId2 = workbook.addImage({
+            buffer: buf2.buffer as ArrayBuffer,
+            extension: 'jpeg',
+          })
+          sheet.addImage(imageId2, 'B11:I11')
+        }
       }
     }
   }
