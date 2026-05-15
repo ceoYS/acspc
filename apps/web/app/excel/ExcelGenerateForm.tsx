@@ -1,21 +1,53 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
-const inputClass =
+const selectClass =
   'min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-slate-900'
 
+type Row = { id: string; name: string }
+
 export default function ExcelGenerateForm() {
+  const supabase = createClient()
+
+  const [projects, setProjects] = useState<Row[]>([])
+  const [vendors, setVendors] = useState<Row[]>([])
   const [projectId, setProjectId] = useState('')
   const [vendorId, setVendorId] = useState('')
   const [sortKey, setSortKey] = useState<'location' | 'date'>('location')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    supabase
+      .from('projects')
+      .select('id, name')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setProjects(data ?? []))
+  }, [])
+
+  useEffect(() => {
+    if (!projectId) {
+      setVendors([])
+      setVendorId('')
+      return
+    }
+    supabase
+      .from('vendors')
+      .select('id, name')
+      .eq('project_id', projectId)
+      .order('name')
+      .then(({ data }) => {
+        setVendors(data ?? [])
+        setVendorId('')
+      })
+  }, [projectId])
+
   const handleGenerate = async () => {
     setError(null)
     if (!projectId || !vendorId) {
-      setError('project_id, vendor_id 모두 UUID 입력 필요.')
+      setError('프로젝트와 업체를 선택해주세요.')
       return
     }
     setLoading(true)
@@ -30,8 +62,7 @@ export default function ExcelGenerateForm() {
         }),
       })
       if (!res.ok) {
-        const text = await res.text()
-        setError(`생성 실패 (${res.status}): ${text}`)
+        setError(`생성 실패 (${res.status}): ${await res.text()}`)
         setLoading(false)
         return
       }
@@ -59,27 +90,42 @@ export default function ExcelGenerateForm() {
   return (
     <section className="space-y-3 rounded border border-slate-300 p-4">
       <label className="flex flex-col gap-1">
-        <span className="text-sm text-slate-700">project_id (UUID)</span>
-        <input
-          type="text"
-          aria-label="project_id"
+        <span className="text-sm text-slate-700">프로젝트</span>
+        <select
+          aria-label="프로젝트 선택"
           value={projectId}
           onChange={(e) => setProjectId(e.target.value)}
-          className={inputClass}
-        />
+          className={selectClass}
+        >
+          <option value="">프로젝트 선택</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </label>
+
       <label className="flex flex-col gap-1">
-        <span className="text-sm text-slate-700">vendor_id (UUID)</span>
-        <input
-          type="text"
-          aria-label="vendor_id"
+        <span className="text-sm text-slate-700">업체</span>
+        <select
+          aria-label="업체 선택"
           value={vendorId}
           onChange={(e) => setVendorId(e.target.value)}
-          className={inputClass}
-        />
+          disabled={!projectId}
+          className={selectClass}
+        >
+          <option value="">업체 선택</option>
+          {vendors.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+            </option>
+          ))}
+        </select>
       </label>
+
       <fieldset className="flex flex-col gap-1">
-        <legend className="text-sm text-slate-700">정렬 기준</legend>
+        <legend className="text-sm text-slate-700">엑셀 시트 분류 기준</legend>
         <div className="flex gap-4">
           <label className="flex items-center gap-2 text-sm text-slate-900">
             <input
@@ -89,7 +135,7 @@ export default function ExcelGenerateForm() {
               checked={sortKey === 'location'}
               onChange={() => setSortKey('location')}
             />
-            위치 순
+            위치별
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-900">
             <input
@@ -99,10 +145,11 @@ export default function ExcelGenerateForm() {
               checked={sortKey === 'date'}
               onChange={() => setSortKey('date')}
             />
-            날짜 순
+            날짜순
           </label>
         </div>
       </fieldset>
+
       <button
         type="button"
         onClick={handleGenerate}
