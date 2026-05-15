@@ -11,12 +11,14 @@ const inputClass =
   'min-h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-slate-900'
 
 export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
-  const [projectId, setProjectId] = useState('')
+  const [projectName, setProjectName] = useState('')
   const [locationName, setLocationName] = useState('')
   const [tradeName, setTradeName] = useState('')
   const [vendorName, setVendorName] = useState('')
   const [contentText, setContentText] = useState('')
-  const [takenAt, setTakenAt] = useState('')
+  const [takenAt, setTakenAt] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  )
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +31,7 @@ export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
     setSignedUrl(null)
 
     if (
-      !projectId ||
+      !projectName ||
       !locationName ||
       !tradeName ||
       !vendorName ||
@@ -37,7 +39,7 @@ export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
       !file
     ) {
       setError(
-        'project_id, 위치, 공종, 업체, 내용, 파일을 모두 입력하세요.',
+        '공사명, 위치, 공종, 업체, 내용, 파일을 모두 입력하세요.',
       )
       return
     }
@@ -45,7 +47,7 @@ export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
     setUploading(true)
 
     const formData = new FormData()
-    formData.append('project_id', projectId)
+    formData.append('project_name', projectName)
     formData.append('location_name', locationName)
     formData.append('trade_name', tradeName)
     formData.append('vendor_name', vendorName)
@@ -61,7 +63,7 @@ export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
     if (!result.ok) {
       const messages: Record<typeof result.error, string> = {
         validation:
-          '입력값 검증 실패 (project_id UUID / 위치·공종·업체 1~100자 / 내용 1~200자 / 파일 확인).',
+          '입력값 검증 실패 (공사명 1~200자 / 위치·공종·업체 1~100자 / 내용 1~200자 / 파일 확인).',
         unauthorized: '로그인 필요.',
         storage: 'storage upload 실패.',
         db: 'DB insert 실패 (storage rollback 수행).',
@@ -81,12 +83,13 @@ export default function PhotoUploadForm({ uploadPhotoAction }: Props) {
     <section className="space-y-3 rounded border border-slate-300 p-4">
       <h2 className="text-lg font-semibold">Photo Upload (V1 임시)</h2>
       <label className="flex flex-col gap-1">
-        <span className="text-sm text-slate-700">project_id (UUID)</span>
+        <span className="text-sm text-slate-700">공사명 (1~200자)</span>
         <input
           type="text"
-          aria-label="project_id"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
+          aria-label="project_name"
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          maxLength={200}
           className={inputClass}
         />
       </label>

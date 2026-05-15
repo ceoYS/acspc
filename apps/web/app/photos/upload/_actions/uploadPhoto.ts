@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 
 const InputSchema = z.object({
-  project_id: z.uuid(),
+  project_name: z.string().min(1).max(200),
   content_text: z.string().min(1).max(200),
   location_name: z.string().min(1).max(100),
   trade_name: z.string().min(1).max(100),
@@ -23,6 +23,34 @@ export type UploadPhotoResult =
 
 // vendor_name 의 엑셀 파일명 금지 문자 → '_' (domain-model §4)
 const VENDOR_FORBIDDEN = /[\\/:*?"<>|]/g
+
+async function upsertProjectId(
+  supabase: SupabaseClient,
+  userId: string,
+  name: string,
+): Promise<string | null> {
+  const { data: existing, error: selectError } = await supabase
+    .from('projects')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('name', name)
+    .maybeSingle()
+  if (selectError) {
+    return null
+  }
+  if (existing?.id) {
+    return existing.id as string
+  }
+  const { data: inserted, error: insertError } = await supabase
+    .from('projects')
+    .insert({ user_id: userId, name })
+    .select('id')
+    .single()
+  if (insertError || !inserted?.id) {
+    return null
+  }
+  return inserted.id as string
+}
 
 async function upsertMasterId(
   supabase: SupabaseClient,
@@ -60,7 +88,7 @@ export async function uploadPhotoAction(
 ): Promise<UploadPhotoResult> {
   const takenAtRaw = formData.get('taken_at')
   const parsed = InputSchema.safeParse({
-    project_id: formData.get('project_id'),
+    project_name: formData.get('project_name'),
     content_text: formData.get('content_text'),
     location_name: formData.get('location_name'),
     trade_name: formData.get('trade_name'),
@@ -75,7 +103,7 @@ export async function uploadPhotoAction(
     return { ok: false, error: 'validation' }
   }
   const {
-    project_id,
+    project_name,
     content_text,
     location_name,
     trade_name,
@@ -92,27 +120,32 @@ export async function uploadPhotoAction(
     return { ok: false, error: 'unauthorized' }
   }
 
+  const projectId = await upsertProjectId(supabase, user.id, project_name)
+  if (!projectId) {
+    return { ok: false, error: 'master' }
+  }
+
   const vendorNameSafe = vendor_name.replace(VENDOR_FORBIDDEN, '_')
 
   const locationId = await upsertMasterId(
     supabase,
     'locations',
     user.id,
-    project_id,
+    projectId,
     location_name,
   )
   const tradeId = await upsertMasterId(
     supabase,
     'trades',
     user.id,
-    project_id,
+    projectId,
     trade_name,
   )
   const vendorId = await upsertMasterId(
     supabase,
     'vendors',
     user.id,
-    project_id,
+    projectId,
     vendorNameSafe,
   )
   if (!locationId || !tradeId || !vendorId) {
@@ -120,7 +153,7 @@ export async function uploadPhotoAction(
   }
 
   const photoUuid = crypto.randomUUID()
-  const storagePath = `${user.id}/${project_id}/${photoUuid}.jpg`
+  const storagePath = `${user.id}/${projectId}/${photoUuid}.jpg`
 
   const { error: uploadError } = await supabase.storage
     .from('photos')
@@ -132,7 +165,7 @@ export async function uploadPhotoAction(
   const { error: insertError } = await supabase.from('photos').insert({
     id: photoUuid,
     user_id: user.id,
-    project_id,
+    project_id: projectId,
     location_id: locationId,
     trade_id: tradeId,
     vendor_id: vendorId,
