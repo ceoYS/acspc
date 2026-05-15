@@ -260,11 +260,10 @@ export async function POST(req: Request) {
       title.font = { name: '맑은 고딕', bold: true, size: 32 }
       title.alignment = { horizontal: 'center', vertical: 'middle' }
 
+      sheet.getCell('A2').value = workbook.worksheets.length
+
       const projectCell = sheet.getCell('A3')
-      projectCell.value =
-        sortKey === 'location'
-          ? `${project.name} — 위치: ${pickName(groupFirst.location)}`
-          : `${project.name} / ${groupKey}`
+      projectCell.value = project.name
       projectCell.font = { bold: true, size: 12 }
       projectCell.alignment = { horizontal: 'center', vertical: 'middle' }
 
