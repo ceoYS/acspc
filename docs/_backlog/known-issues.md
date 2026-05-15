@@ -788,6 +788,9 @@ KI-26 (storage.objects revoke 미발동, 후속 chunk 등재 예정) 의 선행 
 - D-4r home T1A: commit `c8f2c0e` — fix(db): grant CRUD on projects to authenticated (Phase 5.2 누락 보충)
 - 신규 migration: `supabase/migrations/0002_grant_projects_authenticated.sql`
 
+
+> ### 📂 ACTIVE — 회피 패턴 적용 중, 미해결
+
 ## KI-23 (D-4s office 신설): 회사 PC ↔ 집 PC Supabase publishable key 형식 불일치 (JWT anon vs sb_publishable_)
 
 ### 증상
@@ -895,6 +898,95 @@ handoff/메모리 정정 (D-4t 또는 V1 후반 정리 chunk):
 
 (없음, 인지 단계)
 
+## KI-28 (D-4t home 후보 → D-4u 등재): 집 PC 환경 분기 (cert / .env.local / username)
+
+관련: KI-10, KI-24.
+
+### 증상
+
+- 집 PC (`sinabro@DESKTOP-CTPJ4S5`) 에서 회사 PC 용 preamble 그대로 사용 시 외부망에서 corp cert 무관 / 인증 실패 가능
+- 집 PC 에 `.env.local` 미존재 (gitignore 정책). 회사 PC 전용
+- username 상이: 집 `sinabro` / 회사 `founder_ys`. 절대 경로 비교 시 false fail
+
+### 원인
+
+- corp root CA = 사내망 전용. 외부망 무관
+- `.env.local` = PC 별 로컬 작성, git 추적 외
+- PROMPT 작성이 회사 PC 1대 가정 → 환경 분기 누락
+
+### 영향
+
+- 환경 검증 PROMPT false fail (D-4u Step 1 / Step 4)
+- Claude Code STOP 오작동 → Planner 재정정 turn
+
+### 회피 패턴
+
+1. **bash preamble 분기**
+   - 회사 PC: `export NODE_EXTRA_CA_CERTS="$HOME/.certs/corp-root.pem" && export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"`
+   - 집 PC: `export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"` (cert 제거)
+2. **PROMPT 작성 규약**
+   - username 하드코딩 금지. `~/work/acspc` / `$HOME` 사용
+   - 절대 경로 비교 시 `/home/*/work/acspc` 또는 `realpath ~/work/acspc` 동적 비교
+3. **`.env.local` 의존 검증**
+   - PC 분기 명시: 회사 PC 필수 / 집 PC 선택
+   - 부재는 ⚠️ N/A, ❌ 아님
+4. **향후 Supabase 런타임 in 집 PC**
+   - 별도 `.env.local` 수동 작성 또는 회사 PC 전용 작업. 시점 결정
+
+### 검증
+
+D-4u 환경 검증 turn 에서 본 KI 적용 후 Step1~3 ✅, Step4 ⚠️ N/A. 후속 PROMPT 는 규약 적용.
+
+### 후속
+
+Evaluator 체크리스트에 "환경 분기 누락 (PC 별 username/cert/env)" 항목 추가 후보.
+
+### 관련 commit
+
+(없음, 인지 + 회피 규약 단계)
+
+## KI-33 (D-5c): 사용자 발화 모호 해석 — disambiguation 오류 회피 패턴 부재
+
+### 증상
+D-5b 사용자 발화 "정렬기준을 위치순과 날짜 순으로 가져가되, 촬영순으로 날짜 순 및 위치 순으로 **분류한 각각의 셀안에서** 정렬기준을 가져가게 해달라" → Planner (Claude.ai) 가 옵션 A (단순 다중 키 정렬, 양식 변경 없음) 로 해석.
+
+chunk A Gate 2 b-2 결과 사용자 정정: "날짜별로 분류가 안되었다" + "엑셀 셀 구분 칸에 기준점이 되는 날짜와 위치의 정보가 있으면 좋겠다" → 실 의도 = 옵션 B (시트 분리 + 셀 기준 표시). chunk A 의 옵션 A scope = 오해 결과.
+
+### 원인
+"분류" 표현의 다의성:
+- A: 다중 키 정렬 (행 분류 = 정렬 순서 의미)
+- B: 그룹 단위 시각 분리 (시트/헤더 단위 분리)
+
+Planner 가 정찰 turn 에서 옵션 A/B/C 비교 표 제시했으나, **사용자에게 mockup 또는 예시 데이터 표로 결과 차이를 시각화 안 함** → "권장대로" 발화 (옵션 A) 가 모호 동의로 진행. b-2 검증 시 정정.
+
+### 영향
+- D-5c chunk A scope 결정 오류 → chunk A' (옵션 B BX) 별 chunk 신설로 회복
+- 차후 사용자 발화 다의성 시 동일 패턴 재발 위험
+- Gate 2 b-2 1회 추가 시도 발생 (cost 작음)
+
+### 회피 패턴
+1. **사용자 발화 의도 다의성 감지 시 → mockup / 예시 데이터 표로 결과 차이 시각화 후 명시 결정**:
+   - 예: "옵션 A 결과: [시트 1: 위치 다른 사진 함께], 옵션 B 결과: [시트 1: 같은 위치만]" 비교 표
+2. 단순 옵션 비교 표만 제시 시 "권장대로" 묵시 동의 위험 인지
+3. Planner 권장 옵션 선택 전 = "이 옵션 시 결과 X 입니다, 의도 부합하나요?" 명시 발화 요청
+4. **mockup 표 시각화 ≠ 의도 확정** — 표/예시 데이터로 결과 차이 비교했어도, 시각 UI (시트 탭 이름, 인쇄 미리보기, 색상/레이아웃) 의 실 결과는 b-2 단계 실 산출물 본 후에 사용자 의도 정정 가능. D-5d P3 정정 (시트 이름 = "1","2","3" 시퀀스 → 그룹 기준) 이 사례. → 큰 결정일수록 b-2 사용자 검증에서 의도 정정 발생 가능성 인지, 정정 시 thin slice chunk 로 회복 (rollback 회피).
+
+### 검증
+D-5c b-2 사용자 차이 인지 → 옵션 B 진입 결정 (chunk A' 신설). chunk A 의 옵션 A 부분 보존 (history c0aa375).
+
+### 후속
+- Evaluator 체크리스트 §p (사용자 발화 다의성 감지 시 mockup 제시 의무) 신설 후보
+- operating-principles.md §사용자 발화 다의성 처리 패턴 신설 후보
+
+### 관련 commit
+- 옵션 A 진입 (오해 결과): c0aa375
+- 옵션 B (chunk A') 별 chunk 신설 결정: (D-5d 진입 예정)
+- KI-33 등재: 717e60a
+
+---
+
+> ### 📂 DEFERRED → V2 — V1 우회로 결정
+
 ## KI-26 (D-4s office 신설): Supabase storage.objects REVOKE 미발동 (V4 잔존 7권한, superuser owner 추정)
 
 ### 증상
@@ -979,52 +1071,10 @@ V1 단일 bucket (photos) 은 현재 RLS 명시되어 있어 안전 (D-4s office
 
 (없음, V2 회피 패턴 명시 단계)
 
-## KI-28 (D-4t home 후보 → D-4u 등재): 집 PC 환경 분기 (cert / .env.local / username)
 
-관련: KI-10, KI-24.
+---
 
-### 증상
-
-- 집 PC (`sinabro@DESKTOP-CTPJ4S5`) 에서 회사 PC 용 preamble 그대로 사용 시 외부망에서 corp cert 무관 / 인증 실패 가능
-- 집 PC 에 `.env.local` 미존재 (gitignore 정책). 회사 PC 전용
-- username 상이: 집 `sinabro` / 회사 `founder_ys`. 절대 경로 비교 시 false fail
-
-### 원인
-
-- corp root CA = 사내망 전용. 외부망 무관
-- `.env.local` = PC 별 로컬 작성, git 추적 외
-- PROMPT 작성이 회사 PC 1대 가정 → 환경 분기 누락
-
-### 영향
-
-- 환경 검증 PROMPT false fail (D-4u Step 1 / Step 4)
-- Claude Code STOP 오작동 → Planner 재정정 turn
-
-### 회피 패턴
-
-1. **bash preamble 분기**
-   - 회사 PC: `export NODE_EXTRA_CA_CERTS="$HOME/.certs/corp-root.pem" && export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"`
-   - 집 PC: `export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"` (cert 제거)
-2. **PROMPT 작성 규약**
-   - username 하드코딩 금지. `~/work/acspc` / `$HOME` 사용
-   - 절대 경로 비교 시 `/home/*/work/acspc` 또는 `realpath ~/work/acspc` 동적 비교
-3. **`.env.local` 의존 검증**
-   - PC 분기 명시: 회사 PC 필수 / 집 PC 선택
-   - 부재는 ⚠️ N/A, ❌ 아님
-4. **향후 Supabase 런타임 in 집 PC**
-   - 별도 `.env.local` 수동 작성 또는 회사 PC 전용 작업. 시점 결정
-
-### 검증
-
-D-4u 환경 검증 turn 에서 본 KI 적용 후 Step1~3 ✅, Step4 ⚠️ N/A. 후속 PROMPT 는 규약 적용.
-
-### 후속
-
-Evaluator 체크리스트에 "환경 분기 누락 (PC 별 username/cert/env)" 항목 추가 후보.
-
-### 관련 commit
-
-(없음, 인지 + 회피 규약 단계)
+> ### 📂 RESOLVED — 해결 검증 완료
 
 ## KI-29 (D-4v): git mv 후 commit 시 explicit add 대상 산정
 
@@ -1060,7 +1110,7 @@ D-4v 5.5.3 commit + push 재시도 통과 ✅ (Step 2' 수정안, add 대상 uns
 
 ### 관련 commit
 - 사고 발생 + 회피: 3873e5d
-- KI-29 등재: (본 commit)
+- KI-29 등재: 09569ad
 
 ## KI-31 (D-5b): openpyxl AnchorMarker col 해석 오류 (정찰 1A 사후 발견)
 
@@ -1098,7 +1148,7 @@ D-5b 정찰 1A 사후 발견 → E3 변경 4 (`B5:J6` / `B11:J12`) revert. 24022
 
 ### 관련 commit
 - 변경 4 revert: 553d0db
-- KI-31 등재: (본 commit)
+- KI-31 등재: 06f49fc
 
 ## KI-32 (D-5c): PostgREST 의 nested column 으로 parent 정렬 미지원
 
@@ -1146,42 +1196,13 @@ D-5c Gate 2 b-2 발견 → F-1 (client-side sort) 적용. Gate 2 b-2 재검증 P
 - 정찰 시 node_modules impl example 만으로 판단 금지, 실 query smoke test 1회 추가 검토
 
 ### 관련 commit
-- 사고 발생 + F-1 fix + KI-32 등재: (본 commit)
+- 사고 발생 + F-1 fix + KI-32 등재: c0aa375
 
-## KI-33 (D-5c): 사용자 발화 모호 해석 — disambiguation 오류 회피 패턴 부재
 
-### 증상
-D-5b 사용자 발화 "정렬기준을 위치순과 날짜 순으로 가져가되, 촬영순으로 날짜 순 및 위치 순으로 **분류한 각각의 셀안에서** 정렬기준을 가져가게 해달라" → Planner (Claude.ai) 가 옵션 A (단순 다중 키 정렬, 양식 변경 없음) 로 해석.
+---
 
-chunk A Gate 2 b-2 결과 사용자 정정: "날짜별로 분류가 안되었다" + "엑셀 셀 구분 칸에 기준점이 되는 날짜와 위치의 정보가 있으면 좋겠다" → 실 의도 = 옵션 B (시트 분리 + 셀 기준 표시). chunk A 의 옵션 A scope = 오해 결과.
+> ### 📂 결번
 
-### 원인
-"분류" 표현의 다의성:
-- A: 다중 키 정렬 (행 분류 = 정렬 순서 의미)
-- B: 그룹 단위 시각 분리 (시트/헤더 단위 분리)
+## KI-30 — 결번
 
-Planner 가 정찰 turn 에서 옵션 A/B/C 비교 표 제시했으나, **사용자에게 mockup 또는 예시 데이터 표로 결과 차이를 시각화 안 함** → "권장대로" 발화 (옵션 A) 가 모호 동의로 진행. b-2 검증 시 정정.
-
-### 영향
-- D-5c chunk A scope 결정 오류 → chunk A' (옵션 B BX) 별 chunk 신설로 회복
-- 차후 사용자 발화 다의성 시 동일 패턴 재발 위험
-- Gate 2 b-2 1회 추가 시도 발생 (cost 작음)
-
-### 회피 패턴
-1. **사용자 발화 의도 다의성 감지 시 → mockup / 예시 데이터 표로 결과 차이 시각화 후 명시 결정**:
-   - 예: "옵션 A 결과: [시트 1: 위치 다른 사진 함께], 옵션 B 결과: [시트 1: 같은 위치만]" 비교 표
-2. 단순 옵션 비교 표만 제시 시 "권장대로" 묵시 동의 위험 인지
-3. Planner 권장 옵션 선택 전 = "이 옵션 시 결과 X 입니다, 의도 부합하나요?" 명시 발화 요청
-4. **mockup 표 시각화 ≠ 의도 확정** — 표/예시 데이터로 결과 차이 비교했어도, 시각 UI (시트 탭 이름, 인쇄 미리보기, 색상/레이아웃) 의 실 결과는 b-2 단계 실 산출물 본 후에 사용자 의도 정정 가능. D-5d P3 정정 (시트 이름 = "1","2","3" 시퀀스 → 그룹 기준) 이 사례. → 큰 결정일수록 b-2 사용자 검증에서 의도 정정 발생 가능성 인지, 정정 시 thin slice chunk 로 회복 (rollback 회피).
-
-### 검증
-D-5c b-2 사용자 차이 인지 → 옵션 B 진입 결정 (chunk A' 신설). chunk A 의 옵션 A 부분 보존 (history c0aa375).
-
-### 후속
-- Evaluator 체크리스트 §p (사용자 발화 다의성 감지 시 mockup 제시 의무) 신설 후보
-- operating-principles.md §사용자 발화 다의성 처리 패턴 신설 후보
-
-### 관련 commit
-- 옵션 A 진입 (오해 결과): c0aa375
-- 옵션 B (chunk A') 별 chunk 신설 결정: (D-5d 진입 예정)
-- KI-33 등재: (본 commit)
+> D-4s ~ D-5b 사이 번호 skip. 의도 skip 또는 누락 여부 원문 메타 없음. 보존 차원에서 명시.
