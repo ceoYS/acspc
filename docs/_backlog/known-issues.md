@@ -1072,6 +1072,86 @@ V1 단일 bucket (photos) 은 현재 RLS 명시되어 있어 안전 (D-4s office
 (없음, V2 회피 패턴 명시 단계)
 
 
+## KI-34 (D-5h): `upsertMasterId` 에러 처리 불투명
+
+### 메타
+
+- 발견 세션: D-5h
+- 상태: DEFERRED → V2 (V1.5+ 부분 도입 가능 — 디버깅 편의 차원)
+- 분류: 디버깅 편의 / UX
+
+### 증상
+
+`apps/web/app/photos/upload/_actions/uploadPhoto.ts` 의 `upsertMasterId` 헬퍼 (line 55~84) 가 select/insert 양 단계에서 에러 발생 시 모두 `null` 만 반환. 호출부 (line 151~152) 는 location/trade/vendor 중 하나라도 `null` 이면 `error: 'master'` 단일 분기로 처리.
+
+```typescript
+// 55~84
+async function upsertMasterId(...) {
+  const { data: existing, error: selectError } = await supabase.from(...).select(...).maybeSingle()
+  if (selectError) return null    // ① 로그 없음
+  if (existing) return existing.id
+  const { data: inserted, error: insertError } = await supabase.from(...).insert(...).select().single()
+  if (insertError) return null    // ② 로그 없음
+  return inserted.id
+}
+
+// 151~152 (호출부)
+if (!locationId || !tradeId || !vendorId) {
+  return { ok: false, error: 'master' }
+}
+```
+
+### 원인
+
+V1 chunk 1-A (cce3fd5) 에서 빠른 구현 우선. 정상 경로 + 단일 에러 코드만 반환하여 클라이언트 메시지 일원화. 디버깅 관점 정보 (어느 테이블의 어느 단계 실패) 미보존.
+
+### 영향
+
+- select 실패 / insert 실패 / RLS 차단 / unique 제약 충돌 구분 불가
+- console.error 또는 server log 출력 없음 → 사용자 신고 시 재현 외 진단 경로 부재
+- D-5h 자가 검증 단계에서 "왜 실패했는지" 추적 시 별도 query 필요
+- 신규 사용자 시나리오 (시나리오 B) 진입 시 진단 비용 상승 가능
+
+### 회피 패턴 (V1.5+ 권장)
+
+```typescript
+async function upsertMasterId(...) {
+  const { data: existing, error: selectError } = await supabase.from(...).select(...).maybeSingle()
+  if (selectError) {
+    console.error('[upsertMasterId] select failed', { table, name, code: selectError.code, message: selectError.message })
+    return { ok: false, stage: 'select', code: selectError.code }
+  }
+  if (existing) return { ok: true, id: existing.id }
+  const { data: inserted, error: insertError } = await supabase.from(...).insert(...).select().single()
+  if (insertError) {
+    console.error('[upsertMasterId] insert failed', { table, name, code: insertError.code, message: insertError.message })
+    return { ok: false, stage: 'insert', code: insertError.code }
+  }
+  return { ok: true, id: inserted.id }
+}
+```
+
+호출부:
+
+```typescript
+if (locationRes.ok === false) return { ok: false, error: `master:${locationRes.stage}_failed` }
+// trade / vendor 동일 패턴
+```
+
+### 검증
+
+D-5h 검증에서 정상 경로만 통과. 에러 경로는 미검증 (현재 retry / 안내 부재).
+
+### 관련
+
+- MF-06 (vendors unique 미추가) — insert 실패 시 unique 충돌 가능성과 관련
+- carryover-19 (autocomplete) — autocomplete 도입 시 master 입력 빈도 증가 → 에러 가시화 가치 상승
+
+### 관련 commit
+
+- cce3fd5 (D-5g chunk 1-A, upsertMasterId 헬퍼 신설)
+
+
 ---
 
 > ### 📂 RESOLVED — 해결 검증 완료
